@@ -519,7 +519,7 @@ tailwind.config = {
     //      not connected yet, backend has no frames, etc).
     let camRetryTimer = null;
     let camWatchdogTimer = null;
-    const CAM_STALE_TIMEOUT_MS = 6000; // no new frame in this window = treat feed as dead
+    const CAM_STALE_TIMEOUT_MS = 3000; // no new frame in this window = treat feed as dead
 
     function showCameraFallback(label) {
         if (els.camStreamImg) els.camStreamImg.classList.add("hidden");
