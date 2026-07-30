@@ -1,0 +1,245 @@
+/* ---------- Base ---------- */
+html {
+    /* Reserves the vertical scrollbar's width permanently, whether or not
+       it's actually needed. Without this, the page width shifts by the
+       scrollbar's width whenever content height changes enough to toggle
+       the scrollbar on/off (e.g. short vs. long material description text)
+       — that's what was causing the whole layout to visibly shift right
+       after a scan. */
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+}
+
+/* ---------- Scrollbars ---------- */
+/* Themed to match the dark navy / electric-blue palette instead of the
+   browser's default light scrollbar. Applies globally, which covers both
+   the main page scroll and any inner scroll area (e.g. the Support
+   modal's #supportModal, which has overflow-y-auto). */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #33394a #0d1322;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0d1322;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #33394a;
+    border-radius: 9999px;
+    border: 2px solid #0d1322;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #adc6ff;
+}
+
+::-webkit-scrollbar-corner {
+    background: #0d1322;
+}
+
+body {
+    background-color: #0d1322;
+    color: #dde2f8;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+}
+
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* ---------- Panels ---------- */
+.glass-panel {
+    background: rgba(13, 19, 34, 0.7);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(226, 232, 240, 0.1);
+    transition: border-color 0.2s ease;
+}
+
+.glass-panel:hover {
+    border-color: rgba(173, 198, 255, 0.3);
+}
+
+.active-glow {
+    box-shadow: 0 0 20px rgba(173, 198, 255, 0.15);
+    border-color: rgba(173, 198, 255, 0.4);
+}
+
+/* ---------- Pulses ---------- */
+.pulse-blue {
+    animation: pulse-blue 2s infinite;
+}
+
+.pulse-fast {
+    animation: pulse-blue 1s infinite;
+}
+
+@keyframes pulse-blue {
+    0% {
+        box-shadow: 0 0 0 0 rgba(173, 198, 255, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(173, 198, 255, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(173, 198, 255, 0);
+    }
+}
+
+/* ---------- Scanline ---------- */
+.scanline {
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(to right, transparent, #adc6ff, transparent);
+    position: absolute;
+    top: 0;
+    left: 0;
+    animation: scan 3s linear infinite;
+    z-index: 15;
+}
+
+@keyframes scan {
+    0% {
+        top: 0;
+        opacity: 0;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        top: 100%;
+        opacity: 0;
+    }
+}
+
+/* ---------- Conveyor scene (replaces the broken external image) ---------- */
+.conveyor-scene {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 30% 20%, #16233d 0%, #090f1c 70%);
+    overflow: hidden;
+}
+
+.conveyor-belt {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 42%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #4d8eff, transparent);
+    opacity: 0.5;
+    animation: belt-shimmer 2.4s linear infinite;
+}
+
+.conveyor-belt--lower {
+    top: 68%;
+    height: 2px;
+    animation-duration: 3.2s;
+}
+
+@keyframes belt-shimmer {
+    0% {
+        background-position-x: 0;
+    }
+
+    100% {
+        background-position-x: 200px;
+    }
+}
+
+.conveyor-item {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 70px;
+    height: 110px;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(160deg, #e7ecff 0%, #adc6ff 55%, #7ba2f0 100%);
+    border-radius: 10px 10px 16px 16px;
+    box-shadow: 0 0 30px rgba(173, 198, 255, 0.25);
+    transition: background 0.6s ease;
+}
+
+/* ---------- Header extras ---------- */
+.logo-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background-image: url("logo.jpeg");
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 0 14px rgba(173, 198, 255, 0.35);
+}
+
+.avatar-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 9999px;
+    background: #242a3a;
+    border: 1px solid rgba(226, 232, 240, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #adc6ff;
+}
+
+/* ---------- Sidebar nav ---------- */
+.nav-item {
+    background: transparent;
+    border: none;
+    color: #c2c6d6;
+}
+
+.nav-item:hover {
+    background: rgba(47, 52, 69, 0.3);
+    color: #dde2f8;
+}
+
+.nav-item--active {
+    background: rgba(77, 142, 255, 0.15);
+    color: #adc6ff;
+    border-right: 4px solid #adc6ff;
+}
+
+/* ---------- History table row-in animation ---------- */
+@keyframes rowFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.row-enter {
+    animation: rowFadeIn 0.4s ease;
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+
+    .pulse-blue,
+    .pulse-fast,
+    .scanline,
+    .conveyor-belt,
+    .row-enter {
+        animation: none !important;
+    }
+}

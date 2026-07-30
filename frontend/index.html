@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>SpectraLink AI | Plastic Waste Management</title>
+    <link rel="icon" href="data:," />
+
+    <!-- Tailwind (Play CDN) -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+    <!-- The Play CDN above has to download, then scan the page and inject its
+         stylesheet AFTER the HTML has already painted. Until that finishes,
+         the browser doesn't know what classes like "absolute"/"bottom-4"
+         mean, so things briefly sit in plain unstyled positions and then
+         visibly snap into place a moment later. This hides the page until
+         that settles, so there's nothing to see snap. -->
+    <style>
+        body { visibility: hidden; }
+    </style>
+
+    <!-- Fonts (de-duplicated) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Inter:wght@300..600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- Chart.js for the Analytics view -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+
+    <!-- EmailJS for the Support modal's complaint form -->
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+    <!-- Tailwind config must run after the CDN script tag, before the page is scanned -->
+    <script src="script.js"></script>
+
+    <!-- Reveals the page after two animation frames post-DOMContentLoaded,
+         which gives Tailwind's injected stylesheet time to be applied and
+         layout to settle before anything becomes visible. -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    document.body.style.visibility = "visible";
+                });
+            });
+        });
+    </script>
+</head>
+
+<body class="bg-background text-on-background antialiased">
+
+
+    <!-- Sidebar -->
+
+
+    <aside
+        class="fixed left-0 top-0 h-full w-64 bg-surface-dim/80 backdrop-blur-lg border-r border-outline-variant/10 flex flex-col py-stack-md z-[60]">
+        <div class="px-container-margin mb-stack-lg">
+            <h1 class="font-headline-md text-headline-md text-primary font-bold tracking-tight">SpectraLink AI</h1>
+            <div class="flex items-center mt-2 space-x-2">
+                <div class="w-2 h-2 rounded-full bg-primary pulse-blue"></div>
+
+                <!-- change -->
+
+                <p class="font-label-caps text-label-caps text-on-surface-variant" id="systemStatusLabel">Scanning
+                    Active</p>
+            </div>
+
+        </div>
+
+        <!-- 2nd part of slidebar -->
+
+        <nav class="flex-1 px-4 space-y-2" id="sidebarNav">
+
+            <button type="button" data-view="dashboard" aria-current="page"
+                class="nav-item nav-item--active w-full text-left px-4 py-3 flex items-center space-x-3 cursor-pointer transition-all duration-200 rounded">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+                <span class="font-label-caps text-label-caps">Dashboard</span>
+            </button>
+
+            <button type="button" data-view="analytics"
+                class="nav-item w-full text-left px-4 py-3 flex items-center space-x-3 cursor-pointer transition-all duration-200 rounded">
+                <span class="material-symbols-outlined">analytics</span>
+                <span class="font-label-caps text-label-caps">Analytics</span>
+            </button>
+
+            <button type="button" data-view="history"
+                class="nav-item w-full text-left px-4 py-3 flex items-center space-x-3 cursor-pointer transition-all duration-200 rounded">
+                <span class="material-symbols-outlined">history</span>
+                <span class="font-label-caps text-label-caps">History</span>
+            </button>
+
+            <button type="button" data-view="settings"
+                class="nav-item w-full text-left px-4 py-3 flex items-center space-x-3 cursor-pointer transition-all duration-200 rounded">
+                <span class="material-symbols-outlined">settings</span>
+                <span class="font-label-caps text-label-caps">Settings</span>
+            </button>
+
+        </nav>
+
+
+        <!-- 3rd Part of slidebar -->
+
+        <div class="px-4 mt-auto space-y-4">
+            <button type="button" id="exportDataBtn"
+                class="w-full bg-primary text-on-primary font-label-caps text-label-caps py-3 rounded-lg flex items-center justify-center space-x-2 active:scale-95 transition-transform">
+                <span class="material-symbols-outlined text-[18px]">file_download</span>
+                <span>Export Data</span>
+            </button>
+
+            <div class="space-y-1">
+                <button type="button" id="sidebarSupportBtn"
+                    class="w-full text-left text-on-surface-variant hover:text-on-surface px-4 py-2 flex items-center space-x-3 cursor-pointer text-sm">
+                    <span class="material-symbols-outlined text-[18px]">help</span>
+                    <span class="font-label-caps text-label-caps">Support</span>
+                </button>
+            </div>
+        </div>
+    </aside>
+
+
+    <!-- Main Content -->
+    <main class="ml-64 min-h-screen relative overflow-hidden">
+        <!-- Top Header -->
+        <header
+            class="h-20 flex justify-between items-center px-stack-lg border-b border-outline-variant/10 bg-surface/70 backdrop-blur-xl sticky top-0 z-50">
+            <div class="flex items-center space-x-3">
+                <div class="logo-mark" ></div>
+                
+                <span class="font-headline-md text-headline-md text-on-surface hidden sm:inline">SpectraLink</span>
+
+            </div>
+            <div class="flex items-center space-x-6">
+                <div class="flex flex-col items-end">
+                    <span class="font-label-caps text-label-caps text-primary">System Status</span>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-2 h-2 rounded-full bg-primary pulse-blue"></div>
+
+                        <!-- same change -->
+                        <span id="headerStatus"
+                            class="font-body-md text-on-surface font-semibold uppercase tracking-widest text-[14px]">Scanning</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <button type="button" class="text-primary" aria-label="Sensor status">
+                        <span class="material-symbols-outlined">sensors</span>
+                    </button>
+                   
+
+                    <!-- profile of the user -->
+
+                    <div class="avatar-badge" aria-label="Technician on shift">AT</div>
+                </div>
+            </div>
+        </header>
+
+
+
+
+        <section id="view-dashboard" class="p-stack-lg space-y-gutter relative z-10">
+            <!-- Top Section: Live Detection & Material ID -->
+            <div class="grid grid-cols-12 gap-gutter items-start">
+                <!-- Live Detection Panel -->
+                <div class="col-span-12 lg:col-span-8 glass-panel rounded-xl overflow-hidden active-glow relative min-h-[560px]">
+                    <div class="absolute top-4 left-4 z-20 flex space-x-2">
+                        <span
+                            class="px-2 py-1 bg-error/20 border border-error/40 text-error font-mono-data text-mono-data rounded flex items-center space-x-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-error pulse-fast"></span>
+                            <span>LIVE FEED</span>
+                        </span>
+                        <span id="camStatusBadge"
+                            class="px-2 py-1 bg-surface-container-highest border border-outline-variant text-on-surface-variant font-mono-data text-mono-data rounded">CAM
+                            CONNECTING&hellip;</span>
+                    </div>
+
+                    <!-- ESP32-CAM live stream. Falls back to the CSS conveyor
+                         animation below if the stream can't be reached (no
+                         camera configured yet, camera offline, etc). -->
+                    <img id="camStreamImg" alt="ESP32-CAM live feed"
+                        class="absolute inset-0 w-full h-full object-cover z-0 hidden" />
+
+                    <!-- Conveyor visualization (CSS-only, no external image dependency) -->
+                    <div class="conveyor-scene" id="conveyorScene" aria-hidden="true">
+                        <div class="conveyor-belt"></div>
+                        <div class="conveyor-belt conveyor-belt--lower"></div>
+                        <div class="conveyor-item" id="conveyorItem"></div>
+                    </div>
+
+                    <!-- Bounding Box Overlay -->
+                    <div class="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+                        <div class="w-48 h-80 border-2 border-primary relative">
+                            <div id="bboxLabel"
+                                class="absolute -top-10 left-0 bg-primary text-on-primary px-3 py-1 font-headline-md text-[14px] font-bold rounded-sm shadow-lg whitespace-nowrap">
+                                AWAITING SCAN
+                            </div>
+                            <div class="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-white"></div>
+                            <div class="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-white"></div>
+                            <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-white"></div>
+                            <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-white"></div>
+                        </div>
+                    </div>
+                    <div class="scanline"></div>
+
+                    <div class="absolute bottom-4 left-4 right-4 flex justify-between items-end z-20">
+                        <div class="bg-surface-dim/60 backdrop-blur p-4 rounded-lg border border-outline-variant/20">
+                            <div class="font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase">NIR
+                                Spectrum Analysis</div>
+                            <div class="flex items-end space-x-1 h-8" id="nirBars">
+                                <div class="w-1 bg-primary" style="height: 40%"></div>
+                                <div class="w-1 bg-primary" style="height: 70%"></div>
+                                <div class="w-1 bg-primary" style="height: 100%"></div>
+                                <div class="w-1 bg-primary" style="height: 60%"></div>
+                                <div class="w-1 bg-primary" style="height: 90%"></div>
+                                <div class="w-1 bg-primary" style="height: 50%"></div>
+                                <div class="w-1 bg-primary" style="height: 30%"></div>
+                                <div class="w-1 bg-primary" style="height: 80%"></div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="font-mono-data text-mono-data text-on-surface-variant">LATENCY: 
+                                
+                                <!-- change -->
+                                <span
+                                    id="latencyText">12</span>ms</p>
+                            <p class="font-mono-data text-mono-data text-on-surface-variant">FPS: 
+                                
+                                 <!-- change -->
+
+                                <span
+                                    id="fpsText">60.0</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Material ID Card -->
+                <div class="col-span-12 lg:col-span-4 flex flex-col space-y-gutter">
+                    <div class="glass-panel rounded-xl p-card-padding flex-1 flex flex-col justify-between active-glow">
+                        <div>
+                            <div class="flex justify-between items-start mb-6">
+                                <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Current
+                                    Material</span>
+
+                                    <!-- change -->
+
+                                <span id="materialBadge"
+                                    class="bg-surface-container-highest text-on-surface-variant border border-outline-variant px-3 py-1 rounded-full font-label-caps text-label-caps">Standby</span>
+                            </div>
+
+                            <!-- Change -->
+
+                            <h2 id="materialName" class="font-headline-xl text-headline-xl text-primary leading-none mb-2">
+                                &mdash;</h2>
+                            <p id="materialConfidence" class="font-headline-md text-headline-md text-secondary mb-6">
+                                <!-- change -->
+                               Waiting for first scan&hellip;</p>
+
+                               <!-- change  -->
+                            <p id="materialDesc" class="font-body-md text-on-surface-variant leading-relaxed">
+                                No item has been scanned yet. Run a scan from the backend
+                                (test_scan.py, or the ESP32 once connected) and results will
+                                appear here automatically.
+                            </p>
+
+                        </div>
+                        <div class="pt-6 border-t border-outline-variant/10">
+                            <div class="flex items-center space-x-3 text-primary mb-4">
+                                <span class="material-symbols-outlined">info</span>
+                                <span id="materialProperties" class="font-label-caps text-label-caps">Properties:
+                                    &mdash;</span>
+                            </div>
+                            <!-- <div class="flex items-center space-x-3 text-secondary">
+                                <span class="material-symbols-outlined">eco</span>
+                                <span id="carbonOffset" class="font-label-caps text-label-caps">Carbon Offset:
+                                    +1.2kg CO2e</span>
+                            </div> -->
+                        </div>
+                    </div>
+
+                    <!-- Sorting Action -->
+                    <div class="glass-panel rounded-xl p-6 bg-primary-container/10 border-primary/20">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="font-label-caps text-label-caps text-primary uppercase block mb-1">Decision
+                                    Engine</span>
+
+                                    <!-- change -->
+                                     
+                                <span id="routeText" class="font-headline-md text-headline-md text-on-surface">Route:
+                                    &mdash;</span>
+                            </div>
+                            <div class="flex items-center space-x-4">
+                                <div id="routeArrowWrap"
+                                    class="w-12 h-12 rounded-full border-2 border-outline-variant flex items-center justify-center">
+                                    <span id="routeArrowIcon"
+                                        class="material-symbols-outlined text-on-surface-variant text-3xl">hourglass_empty</span>
+                                </div>
+                                <div
+                                    class="w-14 h-14 bg-primary text-on-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
+                                    <span class="material-symbols-outlined text-4xl"
+                                        style="font-variation-settings: 'FILL' 1;">recycling</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Section: Graph & Visualizer -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+                <div class="glass-panel rounded-xl p-card-padding">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-headline-md text-headline-md text-on-surface">Spectral Signature</h3>
+                        <span class="font-mono-data text-mono-data text-primary">NIR - 900-1700nm</span>
+                    </div>
+                    <div class="h-48 relative flex items-end">
+                        <svg class="w-full h-full" id="spectralSvg" preserveAspectRatio="none" viewBox="0 0 100 100">
+                            <defs>
+                                <linearGradient id="lineGrad" x1="0" x2="0" y1="0" y2="1">
+                                    <stop offset="0%" stop-color="#adc6ff" stop-opacity="0.3"></stop>
+                                    <stop offset="100%" stop-color="#adc6ff" stop-opacity="0"></stop>
+                                </linearGradient>
+                            </defs>
+                            <path id="spectralFill" d="M0 100 L0 50 L100 50 L 100 100 Z"
+                                fill="url(#lineGrad)"></path>
+                            <path id="spectralLine" d="M0 50 L100 50" fill="none"
+                                stroke="#adc6ff" stroke-linecap="round" stroke-width="2"></path>
+                            <circle id="spectralPeak" cx="80" cy="10" fill="#ffb95f" r="3" style="display: none;">
+                                <title id="spectralPeakTitle">Awaiting first scan</title>
+                            </circle>
+                        </svg>
+                    </div>
+                    <div
+                        class="flex justify-between mt-4 font-mono-data text-mono-data text-on-surface-variant opacity-60">
+                        <span>900nm</span>
+                        <span>1300nm</span>
+                        <span>1700nm</span>
+                    </div>
+                </div>
+
+                <div
+                    class="glass-panel rounded-xl p-card-padding relative overflow-hidden flex items-center justify-center bg-surface-container-lowest">
+                    <div class="text-center relative z-10">
+                        <div
+                            class="w-24 h-24 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto mb-4">
+                            <span class="material-symbols-outlined text-5xl text-primary"
+                                style="font-variation-settings: 'FILL' 1;">precision_manufacturing</span>
+                        </div>
+                        <h4 class="font-headline-md text-headline-md text-on-surface mb-2">Sorter Mechanism</h4>
+                        <p class="font-body-md text-on-surface-variant max-w-xs mx-auto">Active sorting arm position:
+                            <span id="servoAngle" class="text-secondary">42.5° Offset</span></p>
+                        <div class="mt-6 flex justify-center space-x-2">
+                            <div id="pneumaticsStatus"
+                                class="px-3 py-1 rounded bg-green-500/10 text-green-400 font-label-caps text-[10px] border border-green-500/30">
+                                PNEUMATICS OK</div>
+                            <div id="pressureStatus"
+                                class="px-3 py-1 rounded bg-green-500/10 text-green-400 font-label-caps text-[10px] border border-green-500/30">
+                                PRESSURE 6.2 BAR</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-gutter">
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-primary">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Items Sorted Today</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="itemsSortedCount" class="font-headline-xl text-headline-xl text-on-surface">14,203</span>
+                        <span class="text-green-400 font-mono-data text-mono-data">+12.5%</span>
+                    </div>
+                </div>
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-secondary">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Recyclable %</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="recyclablePct" class="font-headline-xl text-headline-xl text-on-surface">68%</span>
+                        <span class="text-on-surface-variant font-mono-data text-mono-data">Target: 65%</span>
+                    </div>
+                </div>
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-primary-fixed">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Model Accuracy</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="modelAccuracy" class="font-headline-xl text-headline-xl text-on-surface">99.2%</span>
+                        <span class="material-symbols-outlined text-primary text-[18px]">verified</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="glass-panel rounded-xl overflow-hidden">
+                <div class="p-6 border-b border-outline-variant/10 flex justify-between items-center">
+                    <h3 class="font-headline-md text-headline-md text-on-surface">Recent Sort History</h3>
+                    <button type="button" id="viewFullLogBtn"
+                        class="text-primary font-label-caps text-label-caps flex items-center space-x-1 hover:underline">
+                        <span>View Full Log</span>
+                        <span class="material-symbols-outlined text-sm">arrow_forward</span>
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="bg-surface-variant/20">
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Timestamp</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Material</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Confidence</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Decision</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Analysis</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-outline-variant/5">
+                            <!-- Rows are rendered by script.js -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= Analytics View ================= -->
+        <section id="view-analytics" class="hidden p-stack-lg space-y-gutter relative z-10">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="font-headline-lg text-headline-lg text-on-surface">Analytics</h2>
+                    <p class="font-body-md text-on-surface-variant mt-1">Material composition and throughput, computed
+                        live from this session's sort history.</p>
+                </div>
+                <span id="analyticsSampleSize"
+                    class="font-mono-data text-mono-data text-on-surface-variant border border-outline-variant/30 rounded px-3 py-1">0
+                    scans this session</span>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-gutter">
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-primary">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Avg. Confidence</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="analyticsAvgConfidence"
+                            class="font-headline-xl text-headline-xl text-on-surface">&mdash;</span>
+                    </div>
+                </div>
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-secondary">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Recyclable / Rejected</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="analyticsRecycleSplit"
+                            class="font-headline-xl text-headline-xl text-on-surface">&mdash;</span>
+                    </div>
+                </div>
+                <div class="glass-panel rounded-xl p-6 border-l-4 border-primary-fixed">
+                    <p class="font-label-caps text-label-caps text-on-surface-variant mb-2">Most Common Material</p>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="analyticsTopMaterial"
+                            class="font-headline-xl text-headline-xl text-on-surface">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-gutter">
+                <div class="glass-panel rounded-xl p-card-padding">
+                    <h3 class="font-headline-md text-headline-md text-on-surface mb-4">Material Composition</h3>
+                    <div class="relative h-64">
+                        <canvas id="materialDoughnutChart"></canvas>
+                    </div>
+                    <p id="materialChartEmpty" class="font-body-md text-on-surface-variant text-center mt-4">No scans
+                        yet — run a scan to populate this chart.</p>
+                </div>
+
+                <div class="glass-panel rounded-xl p-card-padding">
+                    <h3 class="font-headline-md text-headline-md text-on-surface mb-4">Recyclable vs. Rejected</h3>
+                    <div class="relative h-64">
+                        <canvas id="decisionBarChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-xl p-card-padding lg:col-span-2">
+                    <h3 class="font-headline-md text-headline-md text-on-surface mb-4">Confidence Trend (most recent
+                        scans)</h3>
+                    <div class="relative h-64">
+                        <canvas id="confidenceLineChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-xl p-card-padding lg:col-span-2">
+                    <h3 class="font-headline-md text-headline-md text-on-surface mb-4">Avg. Confidence by Material</h3>
+                    <div class="relative h-64">
+                        <canvas id="confidenceByMaterialChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= History View ================= -->
+        <section id="view-history" class="hidden p-stack-lg space-y-gutter relative z-10">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="font-headline-lg text-headline-lg text-on-surface">Sort History</h2>
+                    <p class="font-body-md text-on-surface-variant mt-1">Full log of every scan received this
+                        session.</p>
+                </div>
+                <button type="button" id="historyExportBtn"
+                    class="bg-primary text-on-primary font-label-caps text-label-caps py-2.5 px-4 rounded-lg flex items-center space-x-2 active:scale-95 transition-transform">
+                    <span class="material-symbols-outlined text-[18px]">file_download</span>
+                    <span>Export CSV</span>
+                </button>
+            </div>
+
+            <!-- Filters -->
+            <div class="glass-panel rounded-xl p-card-padding flex flex-col sm:flex-row gap-gutter sm:items-end">
+                <div class="flex-1">
+                    <label for="historySearchInput"
+                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Search</label>
+                    <input type="text" id="historySearchInput" placeholder="Search material or analysis notes&hellip;"
+                        class="w-full bg-surface-container rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
+                </div>
+                <div>
+                    <label for="historyMaterialFilter"
+                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Material</label>
+                    <select id="historyMaterialFilter"
+                        class="bg-surface-container rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface focus:outline-none focus:border-primary">
+                        <option value="ALL">All Materials</option>
+                        <option value="PET">PET</option>
+                        <option value="HDPE">HDPE</option>
+                        <option value="PP">PP</option>
+                        <option value="LDPE">LDPE</option>
+                        <option value="PVC">PVC</option>
+                        <option value="PS">PS</option>
+                        <option value="OTHER">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="historyDecisionFilter"
+                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Decision</label>
+                    <select id="historyDecisionFilter"
+                        class="bg-surface-container rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface focus:outline-none focus:border-primary">
+                        <option value="ALL">All Decisions</option>
+                        <option value="RECYCLABLE">Recyclable</option>
+                        <option value="REJECTED">Rejected</option>
+                    </select>
+                </div>
+                <div>
+                    <button type="button" id="historyClearFiltersBtn"
+                        class="w-full sm:w-auto bg-surface-container-highest text-on-surface-variant hover:text-on-surface font-label-caps text-label-caps py-2.5 px-4 rounded-lg transition-colors">
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            <!-- Full table -->
+            <div class="glass-panel rounded-xl overflow-hidden">
+                <div class="p-6 border-b border-outline-variant/10 flex justify-between items-center">
+                    <h3 class="font-headline-md text-headline-md text-on-surface">All Scans</h3>
+                    <span id="historyResultCount" class="font-mono-data text-mono-data text-on-surface-variant">0
+                        results</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="bg-surface-variant/20">
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Timestamp</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Material</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Confidence</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Decision</th>
+                                <th
+                                    class="p-4 font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+                                    Analysis</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyPageTableBody" class="divide-y divide-outline-variant/5">
+                            <!-- Rows are rendered by script.js -->
+                        </tbody>
+                    </table>
+                    <p id="historyEmptyState" class="p-10 text-center font-body-md text-on-surface-variant">No scans
+                        recorded yet this session. Results will appear here as items are sorted.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= Settings View ================= -->
+        <section id="view-settings" class="hidden p-stack-lg space-y-gutter relative z-10 max-w-3xl">
+            <div>
+                <h2 class="font-headline-lg text-headline-lg text-on-surface">Settings</h2>
+                <p class="font-body-md text-on-surface-variant mt-1">Connection, display, and data preferences for
+                    this dashboard.</p>
+            </div>
+
+            <!-- Connection -->
+            <div class="glass-panel rounded-xl p-card-padding space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-headline-md text-headline-md text-on-surface">Backend Connection</h3>
+                    <span id="settingsConnectionBadge"
+                        class="px-3 py-1 rounded-full font-label-caps text-label-caps border bg-error/10 text-error border-error/30">Disconnected</span>
+                </div>
+                <div>
+                    <label for="settingsWsUrlInput"
+                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">WebSocket URL</label>
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input type="text" id="settingsWsUrlInput" placeholder="ws://127.0.0.1:8000/ws"
+                            class="flex-1 bg-surface-container rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface font-mono-data text-mono-data placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
+                        <button type="button" id="settingsReconnectBtn"
+                            class="bg-primary text-on-primary font-label-caps text-label-caps py-2.5 px-5 rounded-lg active:scale-95 transition-transform whitespace-nowrap">
+                            Reconnect
+                        </button>
+                    </div>
+                    <p class="font-body-md text-on-surface-variant text-sm mt-2">Point this at your FastAPI
+                        backend's <code class="text-primary">/ws</code> endpoint. Defaults to
+                        <code class="text-primary">ws://127.0.0.1:8000/ws</code> for local development.</p>
+                </div>
+                <div class="pt-2 border-t border-outline-variant/10 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                    <div>
+                        <p class="font-label-caps text-label-caps text-on-surface-variant mb-1">Model</p>
+                        <p id="settingsModelStatus" class="text-on-surface font-mono-data text-mono-data">&mdash;</p>
+                    </div>
+                    <div>
+                        <p class="font-label-caps text-label-caps text-on-surface-variant mb-1">Dashboards</p>
+                        <p id="settingsDashboardCount" class="text-on-surface font-mono-data text-mono-data">&mdash;
+                        </p>
+                    </div>
+                    <div>
+                        <p class="font-label-caps text-label-caps text-on-surface-variant mb-1">Health Check</p>
+                        <p id="settingsHealthStatus" class="text-on-surface font-mono-data text-mono-data">&mdash;</p>
+                    </div>
+                    <div>
+                        <button type="button" id="settingsRefreshHealthBtn"
+                            class="text-primary font-label-caps text-label-caps hover:underline">Refresh</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display preferences -->
+            <div class="glass-panel rounded-xl p-card-padding space-y-4">
+                <h3 class="font-headline-md text-headline-md text-on-surface">Display Preferences</h3>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="font-body-md text-on-surface">Collapsed row count</p>
+                        <p class="font-body-md text-on-surface-variant text-sm">Rows shown in the Dashboard's
+                            "Recent Sort History" before expanding.</p>
+                    </div>
+                    <input type="number" id="settingsCollapsedCountInput" min="1" max="20" value="4"
+                        class="w-20 bg-surface-container rounded-lg border border-outline-variant/30 px-3 py-2 text-on-surface text-center focus:outline-none focus:border-primary" />
+                </div>
+            </div>
+
+            <!-- Data management -->
+            <div class="glass-panel rounded-xl p-card-padding space-y-4">
+                <h3 class="font-headline-md text-headline-md text-on-surface">Data</h3>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button type="button" id="settingsExportBtn"
+                        class="flex-1 bg-primary text-on-primary font-label-caps text-label-caps py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 active:scale-95 transition-transform">
+                        <span class="material-symbols-outlined text-[18px]">file_download</span>
+                        <span>Export Session CSV</span>
+                    </button>
+                    <button type="button" id="settingsClearHistoryBtn"
+                        class="flex-1 bg-error/10 text-error border border-error/30 font-label-caps text-label-caps py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 active:scale-95 transition-transform">
+                        <span class="material-symbols-outlined text-[18px]">delete</span>
+                        <span>Clear Session History</span>
+                    </button>
+                </div>
+                <p class="font-body-md text-on-surface-variant text-sm">Clearing history only affects this browser
+                    session — it does not delete anything on the backend.</p>
+            </div>
+        </section>
+
+        <!-- Floating support button -->
+        <div class="fixed bottom-10 right-10 z-50">
+            <button type="button" id="supportOpenBtn" aria-label="Contact support" aria-haspopup="dialog"
+                class="w-16 h-16 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-xl shadow-primary/30 cursor-pointer active:scale-90 transition-transform group">
+                <span
+                    class="material-symbols-outlined text-3xl group-hover:rotate-45 transition-transform">support_agent</span>
+            </button>
+        </div>
+
+        <!-- ================= Support Modal ================= -->
+        <div id="supportModalOverlay" style="display: none;"
+            class="fixed inset-0 z-[100] bg-surface-container-lowest/80 backdrop-blur-sm items-center justify-center p-4">
+            <div id="supportModal" role="dialog" aria-modal="true" aria-labelledby="supportModalTitle"
+                class="glass-panel bg-surface-container rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative">
+
+                <div
+                    class="sticky top-0 bg-surface-container/95 backdrop-blur-lg p-6 border-b border-outline-variant/10 flex justify-between items-center z-10">
+                    <div>
+                        <h2 id="supportModalTitle" class="font-headline-md text-headline-md text-on-surface">Support &
+                            Team</h2>
+                        <p class="font-body-md text-on-surface-variant text-sm mt-1">Reach the team behind
+                            SpectraLink, or lodge a complaint directly.</p>
+                    </div>
+                    <button type="button" id="supportCloseBtn" aria-label="Close support dialog"
+                        class="w-9 h-9 rounded-full bg-surface-container-highest hover:bg-surface-container-highest/70 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors flex-shrink-0">
+                        <span class="material-symbols-outlined text-xl">close</span>
+                    </button>
+                </div>
+
+                <div class="p-6 space-y-6">
+                    <!-- Team cards -->
+                    <div>
+                        <h3
+                            class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-3">Team
+                            Members</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="supportTeamGrid">
+                            <!-- 4 team cards rendered by script.js from TEAM_MEMBERS -->
+                        </div>
+                    </div>
+
+                    <!-- Complaint form -->
+                    <div class="pt-2 border-t border-outline-variant/10">
+                        <h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-3 mt-4">Lodge
+                            a Complaint</h3>
+                        <form id="complaintForm" class="space-y-4">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="complaintName"
+                                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Your
+                                        Name</label>
+                                    <input type="text" id="complaintName" name="complaintName" required
+                                        placeholder="Jane Doe"
+                                        class="w-full bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
+                                </div>
+                                <div>
+                                    <label for="complaintEmail"
+                                        class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Your
+                                        Email</label>
+                                    <input type="email" id="complaintEmail" name="complaintEmail" required
+                                        placeholder="jane@example.com"
+                                        class="w-full bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
+                                </div>
+                            </div>
+                            <div>
+                                <label for="complaintMessage"
+                                    class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Complaint
+                                    / Feedback</label>
+                                <textarea id="complaintMessage" name="complaintMessage" required rows="4"
+                                    placeholder="Describe the issue you ran into&hellip;"
+                                    class="w-full bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary resize-none"></textarea>
+                            </div>
+
+                            <div id="complaintStatus" class="hidden font-body-md text-sm rounded-lg px-4 py-3"></div>
+
+                            <div class="flex justify-end space-x-3 pt-1">
+                                <button type="button" id="complaintCancelBtn"
+                                    class="font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface px-4 py-2.5 rounded-lg transition-colors">
+                                    Cancel
+                                </button>
+                                <button type="submit" id="complaintSubmitBtn"
+                                    class="bg-primary text-on-primary font-label-caps text-label-caps py-2.5 px-6 rounded-lg flex items-center space-x-2 active:scale-95 transition-transform">
+                                    <span class="material-symbols-outlined text-[18px]">send</span>
+                                    <span>Submit Complaint</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>
