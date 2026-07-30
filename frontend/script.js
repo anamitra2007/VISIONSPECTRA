@@ -518,8 +518,6 @@ tailwind.config = {
     //      a clear status badge, if the stream can't be reached (camera
     //      not connected yet, backend has no frames, etc).
     let camRetryTimer = null;
-    let camWatchdogTimer = null;
-    const CAM_STALE_TIMEOUT_MS = 3000; // no new frame in this window = treat feed as dead
 
     function showCameraFallback(label) {
         if (els.camStreamImg) els.camStreamImg.classList.add("hidden");
@@ -533,41 +531,31 @@ tailwind.config = {
         if (els.camStatusBadge) els.camStatusBadge.textContent = "CAM_04_SORTER";
     }
 
-function startCameraStream() {
-    if (!els.camStreamImg) return;
-    clearTimeout(camRetryTimer);
-    if (els.camStatusBadge) els.camStatusBadge.textContent = "CAM CONNECTING\u2026";
-    els.camStreamImg.src = cameraStreamUrl() + "?t=" + Date.now();
-    armCamWatchdog(); // covers the "never connects in the first place" case too
-}
-
-function armCamWatchdog() {
-    clearTimeout(camWatchdogTimer);
-    camWatchdogTimer = setTimeout(() => {
-        // MJPEG <img> streams don't error just because frames stopped
-        // arriving — without this, it would sit frozen on the last frame
-        // forever instead of showing the default fallback.
-        showCameraFallback("CAM OFFLINE \u2014 retrying\u2026");
-        startCameraStream();
-    }, CAM_STALE_TIMEOUT_MS);
-}
-
-function wireCameraStream() {
-    if (!els.camStreamImg) return;
-
-    els.camStreamImg.addEventListener("load", () => {
-        showCameraLive();
-        armCamWatchdog(); // reset the clock — a fresh frame just arrived
-    });
-    els.camStreamImg.addEventListener("error", () => {
-        showCameraFallback("CAM OFFLINE \u2014 retrying\u2026");
-        clearTimeout(camWatchdogTimer);
+    function startCameraStream() {
+        if (!els.camStreamImg) return;
         clearTimeout(camRetryTimer);
-        camRetryTimer = setTimeout(startCameraStream, RECONNECT_DELAY_MS);
-    });
+        if (els.camStatusBadge) els.camStatusBadge.textContent = "CAM CONNECTING\u2026";
 
-    startCameraStream();
-}
+        // Cache-bust so switching backend URLs (Settings page) or retrying
+        // after an error doesn't just reuse a cached broken image.
+        els.camStreamImg.src = cameraStreamUrl() + "?t=" + Date.now();
+    }
+
+    function wireCameraStream() {
+        if (!els.camStreamImg) return;
+
+        els.camStreamImg.addEventListener("load", showCameraLive);
+        els.camStreamImg.addEventListener("error", () => {
+            showCameraFallback("CAM OFFLINE \u2014 retrying\u2026");
+            // MJPEG <img> streams fire "error" once if the connection
+            // drops (backend restarted, camera disconnected, network
+            // hiccup). Retry every few seconds rather than giving up.
+            clearTimeout(camRetryTimer);
+            camRetryTimer = setTimeout(startCameraStream, RECONNECT_DELAY_MS);
+        });
+
+        startCameraStream();
+    }
 
     // ------------------------------------------------------------------
     // WebSocket connection to the FastAPI backend (main.py's /ws route)
