@@ -105,7 +105,7 @@ tailwind.config = {
     // Change this if the backend runs on a different machine/IP than the
     // one opening this page (e.g. "ws://192.168.1.42:8000/ws"). Mutable —
     // the Settings page can point this at a different backend at runtime.
-    let BACKEND_WS_URL = "wss://your-backend-domain.example.com/ws";
+    let BACKEND_WS_URL = "wss://visionspectra.onrender.com/ws";
     const RECONNECT_DELAY_MS = 3000;
 
     // Derives the plain HTTP origin from the WS URL, for the Settings
