@@ -191,8 +191,9 @@
                     </div>
 
                     <!-- Bounding Box Overlay -->
+                    <!-- Bounding Box Overlay -->
                     <div class="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
-                        <div class="w-96 h-80 border-2 border-primary relative">
+                        <div class="w-48 h-80 border-2 border-primary relative">
                             <div id="bboxLabel"
                                 class="absolute -top-10 left-0 bg-primary text-on-primary px-3 py-1 font-headline-md text-[14px] font-bold rounded-sm shadow-lg whitespace-nowrap">
                                 AWAITING SCAN
@@ -201,9 +202,15 @@
                             <div class="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-white"></div>
                             <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-white"></div>
                             <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-white"></div>
+
+                            <!-- Clips the scanline to just this box's interior, without
+                                 clipping the label/corners above which intentionally sit
+                                 outside the box's edges. -->
+                            <div class="absolute inset-0 overflow-hidden">
+                                <div class="scanline"></div>
+                            </div>
                         </div>
                     </div>
-                    <div class="scanline"></div>
 
                     <div class="absolute bottom-4 left-4 right-4 flex justify-between items-end z-20">
                         <div class="bg-surface-dim/60 backdrop-blur p-4 rounded-lg border border-outline-variant/20">

@@ -18,6 +18,7 @@ import base64
 import io
 import logging
 import os
+import time
 from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Header
@@ -179,6 +180,101 @@ async def scan_item(payload: dict):
 
 
 # ---------------------------------------------------------------------------
+# Auto-scan loop — classifies the live camera feed without waiting for the
+# ESP32 to explicitly call /scan. Runs on a timer in the background: every
+# AUTO_SCAN_INTERVAL_SECONDS it grabs whatever frame the camera most
+# recently uploaded and runs it through YOLO, same as /scan does manually.
+#
+# This exists because there's no NIR sensor wired up yet — fuse_prediction()
+# just passes vision-only results through when nir_reading is empty, so
+# this loop reuses that same path. Once real NIR hardware exists, the
+# ESP32 can go back to calling /scan directly with both image + sensor
+# data, and this loop can be disabled (AUTO_SCAN_ENABLED = False) or left
+# running alongside it.
+# ---------------------------------------------------------------------------
+AUTO_SCAN_ENABLED = True
+AUTO_SCAN_INTERVAL_SECONDS = 2.0
+
+# Below this confidence, treat it as "nothing recognizable in frame" (e.g.
+# empty conveyor belt) rather than broadcasting a low-quality guess.
+AUTO_SCAN_CONFIDENCE_THRESHOLD = 0.60
+
+# Once an item is broadcast, don't broadcast it again on every single tick
+# while it just sits there — only re-broadcast if the detected material
+# changes, or after this many seconds have passed (a "heartbeat" so the
+# dashboard doesn't look stuck if the same item is still there).
+AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS = 8.0
+
+_auto_scan_last_material: str | None = None
+_auto_scan_last_broadcast_time: float = 0.0
+_auto_scan_last_processed_frame_time: float | None = None
+
+
+async def auto_scan_loop():
+    global _auto_scan_last_material, _auto_scan_last_broadcast_time, _auto_scan_last_processed_frame_time
+
+    while True:
+        await asyncio.sleep(AUTO_SCAN_INTERVAL_SECONDS)
+
+        if not AUTO_SCAN_ENABLED or model is None:
+            continue
+        if _latest_frame is None or _last_frame_time is None:
+            continue
+
+        # Skip if the camera feed has gone stale (ESP32-CAM disconnected) —
+        # no point re-classifying the same frozen frame over and over.
+        if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
+            continue
+
+        # Skip if we've already classified this exact frame (camera hasn't
+        # uploaded anything new since our last pass).
+        if _auto_scan_last_processed_frame_time == _last_frame_time:
+            continue
+        _auto_scan_last_processed_frame_time = _last_frame_time
+
+        try:
+            image = Image.open(io.BytesIO(_latest_frame)).convert("RGB")
+            results = model(image, verbose=False)
+            predicted_class = results[0].names[results[0].probs.top1]
+            confidence = float(results[0].probs.top1conf)
+        except Exception as e:
+            logger.warning(f"Auto-scan: classification failed: {e}")
+            continue
+
+        if confidence < AUTO_SCAN_CONFIDENCE_THRESHOLD:
+            continue
+
+        now = time.time()
+        material_changed = predicted_class != _auto_scan_last_material
+        cooldown_elapsed = (now - _auto_scan_last_broadcast_time) >= AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS
+        if not material_changed and not cooldown_elapsed:
+            continue
+
+        info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
+        route = "LEFT" if info["recyclable"] else "RIGHT"
+
+        result = {
+            "material": predicted_class,
+            "confidence": round(confidence * 100, 1),
+            "recyclable": info["recyclable"],
+            "reason": info["reason"],
+            "route": route,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        logger.info(f"Auto-scan result: {result}")
+        await broadcast_result(result)
+
+        _auto_scan_last_material = predicted_class
+        _auto_scan_last_broadcast_time = now
+
+
+@app.on_event("startup")
+async def start_auto_scan_loop():
+    asyncio.create_task(auto_scan_loop())
+
+
+# ---------------------------------------------------------------------------
 # ESP32-CAM live stream
 # ---------------------------------------------------------------------------
 # The ESP32-CAM never talks to the browser directly — it only ever makes
@@ -195,7 +291,16 @@ async def scan_item(payload: dict):
 CAMERA_API_KEY = os.environ.get("CAMERA_API_KEY", "")
 
 _latest_frame: bytes | None = None
+_last_frame_time: float | None = None
 _frame_event = asyncio.Event()
+
+# How long without a new uploaded frame before we consider the camera
+# "disconnected." GET /camera/status reports this to the dashboard, which
+# polls it to decide whether to show the live feed or fall back to the
+# default conveyor animation — since an MJPEG <img> stream itself never
+# signals staleness (the HTTP connection to the browser stays open even
+# when the ESP32-CAM has gone quiet).
+CAMERA_STALE_SECONDS = 6
 
 
 @app.post("/camera/upload")
@@ -205,12 +310,13 @@ async def camera_upload(request: Request, x_api_key: str | None = Header(default
     if CAMERA_API_KEY and x_api_key != CAMERA_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Api-Key header.")
 
-    global _latest_frame
+    global _latest_frame, _last_frame_time
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty request body — expected a JPEG image.")
 
     _latest_frame = body
+    _last_frame_time = time.time()
     _frame_event.set()
     _frame_event.clear()
     return {"ok": True, "bytes": len(body)}
@@ -243,6 +349,18 @@ async def camera_stream():
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
     )
+
+
+@app.get("/camera/status")
+async def camera_status():
+    """Tells the dashboard whether the camera feed is actually live right
+    now — i.e. whether a real frame arrived within the last
+    CAMERA_STALE_SECONDS — rather than just whether the MJPEG connection
+    to the browser happens to still be open (which it always is)."""
+    if _latest_frame is None or _last_frame_time is None:
+        return {"connected": False, "seconds_since_last_frame": None}
+    elapsed = time.time() - _last_frame_time
+    return {"connected": elapsed < CAMERA_STALE_SECONDS, "seconds_since_last_frame": round(elapsed, 1)}
 
 
 @app.get("/camera/latest.jpg")
