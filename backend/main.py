@@ -150,8 +150,10 @@ async def scan_item(payload: dict):
     except Exception as e:
         return {"error": f"Could not decode image: {e}"}
 
-    # Run YOLO classification
-    results = model(image, verbose=False)
+    # Run YOLO classification (offloaded to a thread so this blocking,
+    # CPU-bound call doesn't freeze /camera/stream or /camera/upload while
+    # it runs — same reasoning as auto_scan_loop's _classify_frame_sync).
+    results = await asyncio.to_thread(model, image, verbose=False)
     predicted_class = results[0].names[results[0].probs.top1]
     confidence = float(results[0].probs.top1conf)
 
@@ -236,6 +238,20 @@ def crop_to_bbox_region(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + crop_w, top + crop_h))
 
 
+def _classify_frame_sync(frame_bytes: bytes):
+    """Runs the actual decode + crop + YOLO inference. Synchronous and
+    CPU-bound on purpose — this is meant to be called via
+    asyncio.to_thread(), never awaited directly, so it doesn't block the
+    event loop (which also needs to keep serving /camera/stream and
+    accepting /camera/upload while this runs)."""
+    image = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
+    image = crop_to_bbox_region(image)
+    results = model(image, verbose=False)
+    predicted_class = results[0].names[results[0].probs.top1]
+    confidence = float(results[0].probs.top1conf)
+    return predicted_class, confidence
+
+
 async def auto_scan_loop():
     global _auto_scan_last_material, _auto_scan_last_broadcast_time, _auto_scan_last_processed_frame_time
 
@@ -259,11 +275,7 @@ async def auto_scan_loop():
         _auto_scan_last_processed_frame_time = _last_frame_time
 
         try:
-            image = Image.open(io.BytesIO(_latest_frame)).convert("RGB")
-            image = crop_to_bbox_region(image)
-            results = model(image, verbose=False)
-            predicted_class = results[0].names[results[0].probs.top1]
-            confidence = float(results[0].probs.top1conf)
+            predicted_class, confidence = await asyncio.to_thread(_classify_frame_sync, _latest_frame)
         except Exception as e:
             logger.warning(f"Auto-scan: classification failed: {e}")
             continue
