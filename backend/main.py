@@ -209,6 +209,32 @@ _auto_scan_last_material: str | None = None
 _auto_scan_last_broadcast_time: float = 0.0
 _auto_scan_last_processed_frame_time: float | None = None
 
+# Approximates where the dashboard's on-screen bounding-box reticle sits,
+# so auto-scan classifies roughly "what's inside the box" instead of the
+# entire frame (background, hands, conveyor edges, etc). This is only an
+# approximation — the reticle is CSS-positioned against a responsive video
+# panel with no pixel-exact link to the camera's actual resolution — so
+# it's expressed as a fraction of the frame, not fixed pixels.
+#
+# Box on screen is w-96 h-80 (384x320px, ~1.2:1 ratio). CROP_WIDTH_FRAC /
+# CROP_HEIGHT_FRAC control how much of the frame (centered) counts as
+# "inside the box." If you resize the box in index.html, update these to
+# match its new ratio.
+AUTO_SCAN_CROP_WIDTH_FRAC = 0.55   # fraction of frame width kept, centered
+AUTO_SCAN_CROP_HEIGHT_FRAC = 0.65  # fraction of frame height kept, centered
+
+
+def crop_to_bbox_region(image: Image.Image) -> Image.Image:
+    """Crops the center of `image` down to the region approximating where
+    the dashboard's bounding-box overlay sits, using AUTO_SCAN_CROP_WIDTH_FRAC
+    / AUTO_SCAN_CROP_HEIGHT_FRAC."""
+    w, h = image.size
+    crop_w = int(w * AUTO_SCAN_CROP_WIDTH_FRAC)
+    crop_h = int(h * AUTO_SCAN_CROP_HEIGHT_FRAC)
+    left = (w - crop_w) // 2
+    top = (h - crop_h) // 2
+    return image.crop((left, top, left + crop_w, top + crop_h))
+
 
 async def auto_scan_loop():
     global _auto_scan_last_material, _auto_scan_last_broadcast_time, _auto_scan_last_processed_frame_time
@@ -234,6 +260,7 @@ async def auto_scan_loop():
 
         try:
             image = Image.open(io.BytesIO(_latest_frame)).convert("RGB")
+            image = crop_to_bbox_region(image)
             results = model(image, verbose=False)
             predicted_class = results[0].names[results[0].probs.top1]
             confidence = float(results[0].probs.top1conf)
