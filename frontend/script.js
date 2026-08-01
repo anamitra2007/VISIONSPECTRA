@@ -501,19 +501,23 @@ tailwind.config = {
         els.recyclablePct.textContent = total ? Math.round((recyclableCount / total) * 100) + "%" : "0%";
     }
 
-// ------------------------------------------------------------------
+    // ------------------------------------------------------------------
     // ESP32-CAM live stream
     // ------------------------------------------------------------------
-    // The <img id="camStreamImg"> tag points permanently at the backend's
-    // MJPEG endpoint (GET /camera/stream). We do NOT rely on the <img>'s
-    // load/error events to detect a dead camera — MJPEG streams don't fire
-    // "error" just because frames stop arriving (the HTTP connection stays
-    // open even when the backend has nothing new to send). Instead we poll
-    // a small status endpoint (GET /camera/status) that reports how long
-    // it's been since the backend last received a real frame from the
-    // ESP32, and switch to the fallback based on that.
-    let camStatusPollTimer = null;
-    const CAM_STATUS_POLL_MS = 2000;
+    // The <img id="camStreamImg"> tag points at the backend's MJPEG
+    // endpoint (GET /camera/stream). Browsers render MJPEG streams
+    // natively inside an <img> tag — every new JPEG frame the backend
+    // writes just replaces the previous one, giving live video with no
+    // extra JS needed for the frames themselves.
+    //
+    // We still need JS for two things:
+    //   1. Point the <img> at the *current* backend (it can change via
+    //      the Settings page), so we (re)assign .src whenever that
+    //      happens rather than hardcoding it in the HTML.
+    //   2. Fall back to the decorative CSS conveyor animation, and show
+    //      a clear status badge, if the stream can't be reached (camera
+    //      not connected yet, backend has no frames, etc).
+    let camRetryTimer = null;
 
     function showCameraFallback(label) {
         if (els.camStreamImg) els.camStreamImg.classList.add("hidden");
@@ -527,33 +531,29 @@ tailwind.config = {
         if (els.camStatusBadge) els.camStatusBadge.textContent = "CAM_04_SORTER";
     }
 
-    function pollCameraStatus() {
-        fetch(backendHttpUrl() + "camera/status")
-            .then((res) => res.json())
-            .then((data) => {
-                if (data.connected) {
-                    showCameraLive();
-                } else {
-                    showCameraFallback("CAM OFFLINE \u2014 no frames received");
-                }
-            })
-            .catch(() => {
-                showCameraFallback("CAM OFFLINE \u2014 backend unreachable");
-            });
-    }
-
     function startCameraStream() {
         if (!els.camStreamImg) return;
-        // Cache-bust so switching backend URLs (Settings page) doesn't
-        // just reuse a cached broken image.
+        clearTimeout(camRetryTimer);
+        if (els.camStatusBadge) els.camStatusBadge.textContent = "CAM CONNECTING\u2026";
+
+        // Cache-bust so switching backend URLs (Settings page) or retrying
+        // after an error doesn't just reuse a cached broken image.
         els.camStreamImg.src = cameraStreamUrl() + "?t=" + Date.now();
-        clearInterval(camStatusPollTimer);
-        pollCameraStatus(); // immediate check, don't wait for the first interval
-        camStatusPollTimer = setInterval(pollCameraStatus, CAM_STATUS_POLL_MS);
     }
 
     function wireCameraStream() {
         if (!els.camStreamImg) return;
+
+        els.camStreamImg.addEventListener("load", showCameraLive);
+        els.camStreamImg.addEventListener("error", () => {
+            showCameraFallback("CAM OFFLINE \u2014 retrying\u2026");
+            // MJPEG <img> streams fire "error" once if the connection
+            // drops (backend restarted, camera disconnected, network
+            // hiccup). Retry every few seconds rather than giving up.
+            clearTimeout(camRetryTimer);
+            camRetryTimer = setTimeout(startCameraStream, RECONNECT_DELAY_MS);
+        });
+
         startCameraStream();
     }
 
