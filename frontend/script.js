@@ -321,6 +321,13 @@ tailwind.config = {
             complaintStatus: document.getElementById("complaintStatus"),
             complaintSubmitBtn: document.getElementById("complaintSubmitBtn"),
             complaintCancelBtn: document.getElementById("complaintCancelBtn"),
+
+            // Sign-in modal
+            signInOpenBtn: document.getElementById("signInOpenBtn"),
+            signInModalOverlay: document.getElementById("signInModalOverlay"),
+            signInModal: document.getElementById("signInModal"),
+            signInCloseBtn: document.getElementById("signInCloseBtn"),
+            signInForm: document.getElementById("signInForm"),
         };
     }
 
@@ -1093,6 +1100,53 @@ tailwind.config = {
     }
 
     // ------------------------------------------------------------------
+    // Sign In modal
+    // ------------------------------------------------------------------
+    let signInModalPreviouslyFocused = null;
+
+    function openSignInModal() {
+        if (!els.signInModalOverlay) return;
+        signInModalPreviouslyFocused = document.activeElement;
+        els.signInModalOverlay.style.display = "flex";
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeSignInModal() {
+        if (!els.signInModalOverlay) return;
+        els.signInModalOverlay.style.display = "none";
+        document.body.style.overflow = "";
+        if (signInModalPreviouslyFocused && signInModalPreviouslyFocused.focus) {
+            signInModalPreviouslyFocused.focus();
+        }
+    }
+
+    function wireSignInModal() {
+        if (els.signInOpenBtn) els.signInOpenBtn.addEventListener("click", openSignInModal);
+        if (els.signInCloseBtn) els.signInCloseBtn.addEventListener("click", closeSignInModal);
+
+        if (els.signInModalOverlay) {
+            els.signInModalOverlay.addEventListener("click", (event) => {
+                if (event.target === els.signInModalOverlay) closeSignInModal();
+            });
+        }
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && els.signInModalOverlay && els.signInModalOverlay.style.display !== "none") {
+                closeSignInModal();
+            }
+        });
+
+        // No backend wired up yet — just prevents an actual page navigation
+        // on submit until real auth logic is added.
+        if (els.signInForm) {
+            els.signInForm.addEventListener("submit", (event) => {
+                event.preventDefault();
+            });
+        }
+    }
+
+
+    // ------------------------------------------------------------------
     // Navigation — toggles which <section id="view-*"> is visible and
     // lazily initializes the Analytics charts the first time they're needed.
     // ------------------------------------------------------------------
@@ -1143,6 +1197,7 @@ tailwind.config = {
         wireHistoryPage();
         wireSettingsPage();
         wireSupportModal();
+        wireSignInModal();
         wireCameraStream();
         connectWebSocket();
         setConnectionStatus(false);
