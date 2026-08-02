@@ -1072,7 +1072,7 @@ tailwind.config = {
             emailjs.init(EMAILJS_CONFIG.PUBLIC_KEY);
         }
 
-        if (els.supportOpenBtn) els.supportOpenBtn.addEventListener("click", openSupportModal);
+        
         if (els.sidebarSupportBtn) els.sidebarSupportBtn.addEventListener("click", openSupportModal);
         if (els.supportCloseBtn) els.supportCloseBtn.addEventListener("click", closeSupportModal);
         if (els.complaintCancelBtn) els.complaintCancelBtn.addEventListener("click", closeSupportModal);
