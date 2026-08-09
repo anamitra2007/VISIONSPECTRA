@@ -590,7 +590,7 @@ tailwind.config = {
             try {
                 data = JSON.parse(event.data);
             } catch (e) {
-                console.error("SpectraLink: could not parse message from backend", event.data);
+                console.error("Vision Spectra: could not parse message from backend", event.data);
                 return;
             }
             applyBackendResult(data);
@@ -618,7 +618,7 @@ tailwind.config = {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = "spectralink-sort-history-" + Date.now() + ".csv";
+        link.download = "vision-spectra-sort-history-" + Date.now() + ".csv";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1063,7 +1063,7 @@ tailwind.config = {
                 els.complaintForm.reset();
             })
             .catch((err) => {
-                console.error("SpectraLink: EmailJS send failed", err);
+                console.error("Vision Spectra: EmailJS send failed", err);
                 setComplaintStatus("error", "Couldn't send your complaint. Please try again in a moment.");
             })
             .finally(() => {
