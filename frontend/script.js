@@ -277,6 +277,9 @@ tailwind.config = {
             viewFullLogBtn: document.getElementById("viewFullLogBtn"),
             systemStatusLabel: document.getElementById("systemStatusLabel"),
             headerStatus: document.getElementById("headerStatus"),
+            appSidebar: document.getElementById("appSidebar"),
+            sidebarToggle: document.getElementById("sidebarToggle"),
+            sidebarScrim: document.getElementById("sidebarScrim"),
 
             // History page
             historyPageTableBody: document.getElementById("historyPageTableBody"),
@@ -1176,6 +1179,31 @@ tailwind.config = {
             }
         }
 
+        function closeMobileSidebar() {
+            if (!els.appSidebar) return;
+            els.appSidebar.classList.remove("sidebar-open");
+            document.body.classList.remove("sidebar-is-open");
+            if (els.sidebarToggle) {
+                els.sidebarToggle.setAttribute("aria-expanded", "false");
+                els.sidebarToggle.setAttribute("aria-label", "Open navigation");
+            }
+        }
+
+        if (els.sidebarToggle && els.appSidebar) {
+            els.sidebarToggle.addEventListener("click", () => {
+                const isOpen = els.appSidebar.classList.toggle("sidebar-open");
+                document.body.classList.toggle("sidebar-is-open", isOpen);
+                els.sidebarToggle.setAttribute("aria-expanded", String(isOpen));
+                els.sidebarToggle.setAttribute("aria-label", isOpen ? "Close navigation" : "Open navigation");
+            });
+        }
+
+        if (els.sidebarScrim) els.sidebarScrim.addEventListener("click", closeMobileSidebar);
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") closeMobileSidebar();
+        });
+
         buttons.forEach((btn) => {
             btn.addEventListener("click", () => {
                 buttons.forEach((b) => {
@@ -1185,6 +1213,7 @@ tailwind.config = {
                 btn.classList.add("nav-item--active");
                 btn.setAttribute("aria-current", "page");
                 showView(btn.dataset.view);
+                closeMobileSidebar();
                 // The WebSocket connection keeps running regardless of
                 // which tab is active.
             });

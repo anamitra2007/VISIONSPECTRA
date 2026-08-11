@@ -259,3 +259,173 @@ button.avatar-badge:hover {
         animation: none !important;
     }
 }
+
+/* ---------- Responsive layout ---------- */
+.sidebar-toggle,
+.sidebar-scrim {
+    display: none;
+}
+
+@media (max-width: 1023px) {
+    #appSidebar {
+        width: min(18rem, calc(100vw - 3.5rem));
+        transform: translateX(-105%);
+        transition: transform 0.25s ease;
+        box-shadow: 16px 0 40px rgba(0, 0, 0, 0.35);
+    }
+
+    #appSidebar.sidebar-open {
+        transform: translateX(0);
+    }
+
+    .sidebar-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        opacity: 0;
+        visibility: hidden;
+        background: rgba(4, 8, 18, 0.68);
+        transition: opacity 0.25s ease, visibility 0.25s ease;
+    }
+
+    body.sidebar-is-open .sidebar-scrim {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    body.sidebar-is-open {
+        overflow: hidden;
+    }
+
+    main.ml-64 {
+        margin-left: 0;
+    }
+
+    .sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.5rem;
+        height: 2.5rem;
+        flex: 0 0 auto;
+        color: #adc6ff;
+        border: 1px solid rgba(173, 198, 255, 0.25);
+        border-radius: 0.5rem;
+        background: rgba(36, 42, 58, 0.65);
+    }
+}
+
+@media (max-width: 639px) {
+    html {
+        scrollbar-gutter: auto;
+    }
+
+    header.h-20 {
+        height: 4.25rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .header-actions {
+        gap: 0.75rem;
+    }
+
+    .header-status-wrap,
+    header .text-primary[aria-label="Sensor status"] {
+        display: none;
+    }
+
+    section.p-stack-lg {
+        padding: 1rem;
+    }
+
+    .min-h-\[560px\] {
+        min-height: 25rem;
+    }
+
+    .w-96.h-80 {
+        width: min(78vw, 19rem);
+        height: min(62vw, 15.5rem);
+    }
+
+    #camStatusBadge {
+        max-width: 9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .active-glow .absolute.bottom-4 {
+        align-items: flex-end;
+    }
+
+    .active-glow .absolute.bottom-4 > div:first-child {
+        padding: 0.65rem;
+    }
+
+    .text-headline-xl {
+        font-size: 1.75rem;
+    }
+
+    .text-headline-lg {
+        font-size: 1.5rem;
+    }
+
+    #view-dashboard .glass-panel > .p-6.flex,
+    #view-history .glass-panel > .p-6.flex,
+    #view-history > .flex.justify-between,
+    #view-analytics > .flex.justify-between {
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+
+    #view-history > .flex.justify-between,
+    #view-analytics > .flex.justify-between {
+        flex-direction: column;
+    }
+
+    #historyExportBtn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    #view-settings .flex.items-center.justify-between {
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    #view-settings .grid.grid-cols-2 {
+        grid-template-columns: 1fr;
+    }
+
+    #supportModalOverlay,
+    #signInModalOverlay {
+        padding: 0.75rem;
+    }
+
+    #supportModal .p-6,
+    #signInModal .p-card-padding {
+        padding: 1.25rem;
+    }
+
+    #supportModal .flex.justify-between.items-start {
+        gap: 1rem;
+    }
+
+    #complaintSubmitBtn,
+    #complaintCancelBtn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .fixed.bottom-10.right-10 {
+        right: 1rem;
+        bottom: 1rem;
+    }
+
+    .fixed.bottom-10.right-10 button {
+        width: 3.5rem;
+        height: 3.5rem;
+    }
+}

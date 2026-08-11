@@ -56,7 +56,8 @@
     <!-- Sidebar -->
 
 
-    <aside
+    <div id="sidebarScrim" class="sidebar-scrim" aria-hidden="true"></div>
+    <aside id="appSidebar"
         class="fixed left-0 top-0 h-full w-64 bg-surface-dim/80 backdrop-blur-lg border-r border-outline-variant/10 flex flex-col py-stack-md z-[60]">
         <div class="px-container-margin mb-stack-lg">
             <h1 class="font-headline-md text-headline-md text-primary font-bold tracking-tight">Vision Spectra</h1>
@@ -127,14 +128,17 @@
         <!-- Top Header -->
         <header
             class="h-20 flex justify-between items-center px-stack-lg border-b border-outline-variant/10 bg-surface/70 backdrop-blur-xl sticky top-0 z-50">
-            <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-3 min-w-0">
+                <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Open navigation" aria-controls="appSidebar" aria-expanded="false">
+                    <span class="material-symbols-outlined">menu</span>
+                </button>
                 <div class="logo-mark" ></div>
                 
                 <span class="font-headline-md text-headline-md text-on-surface hidden sm:inline">Vision Spectra</span>
 
             </div>
-            <div class="flex items-center space-x-6">
-                <div class="flex flex-col items-end">
+            <div class="flex items-center space-x-6 header-actions">
+                <div class="flex flex-col items-end header-status-wrap">
                     <span class="font-label-caps text-label-caps text-primary">System Status</span>
                     <div class="flex items-center space-x-2">
                         <div class="w-2 h-2 rounded-full bg-primary pulse-blue"></div>
