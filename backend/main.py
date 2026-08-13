@@ -11,6 +11,13 @@ frames to /camera/upload, and the dashboard reads them back from
 /camera/stream. This indirection is what lets the camera be viewed from
 anywhere on the internet even though it sits behind a home router with
 no public IP — the ESP32-CAM only ever makes outbound requests.
+
+Access control: a single shared username/password (SITE_USERNAME /
+SITE_PASSWORD) gates the WebSocket and camera stream. POST /login with
+the correct credentials to receive a token; every /ws connection and
+/camera/stream request must include that token as a query parameter.
+Tokens live in memory only — they're cleared on server restart, which is
+fine for a single shared account.
 """
 
 import asyncio
@@ -18,6 +25,7 @@ import base64
 import io
 import logging
 import os
+import secrets
 import time
 from datetime import datetime
 
@@ -57,6 +65,51 @@ if YOLO is not None:
         logger.warning(f"Could not load {MODEL_PATH} yet: {e}")
 
 # ---------------------------------------------------------------------------
+# Authentication — single shared account, token-based
+# ---------------------------------------------------------------------------
+# Set these as environment variables in production (Render → Environment
+# tab). The defaults below are only for local testing — change them
+# before sharing a public link.
+SITE_USERNAME = os.environ.get("SITE_USERNAME", "anamitra")
+SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "12345")
+
+# In-memory token store. Fine for a single shared account with no need
+# for per-user tracking — tokens are just "is this person allowed in."
+valid_tokens: set[str] = set()
+
+
+def is_valid_token(token: str | None) -> bool:
+    return token is not None and token in valid_tokens
+
+
+@app.post("/login")
+async def login(payload: dict):
+    """
+    Expected payload: {"username": "...", "password": "..."}
+    Returns {"success": true, "token": "..."} on success.
+    """
+    username = payload.get("username", "")
+    password = payload.get("password", "")
+
+    if username == SITE_USERNAME and password == SITE_PASSWORD:
+        token = secrets.token_urlsafe(32)
+        valid_tokens.add(token)
+        logger.info("Successful login, token issued.")
+        return {"success": True, "token": token}
+
+    logger.info(f"Failed login attempt for username: {username!r}")
+    raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+
+@app.post("/logout")
+async def logout(payload: dict):
+    """Expected payload: {"token": "..."}"""
+    token = payload.get("token")
+    valid_tokens.discard(token)
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
 # Recyclability lookup table
 # ---------------------------------------------------------------------------
 
@@ -79,6 +132,14 @@ connected_clients: list[WebSocket] = []
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if not is_valid_token(token):
+        # 4401 is a custom close code in the app-specific range (4000-4999);
+        # the frontend can use this to distinguish "wrong token" from a
+        # generic dropped connection if it ever needs to.
+        await websocket.close(code=4401)
+        return
+
     await websocket.accept()
     connected_clients.append(websocket)
     logger.info(f"Dashboard client connected ({len(connected_clients)} total)")
@@ -124,7 +185,7 @@ def fuse_prediction(yolo_class: str, yolo_confidence: float, nir_reading: list):
 
 
 # ---------------------------------------------------------------------------
-# Core scan endpoint — this is what the ESP32 calls
+# Core scan endpoint — this is what the ESP32 calls (image-based path)
 # ---------------------------------------------------------------------------
 
 @app.post("/scan")
@@ -182,17 +243,67 @@ async def scan_item(payload: dict):
 
 
 # ---------------------------------------------------------------------------
+# NIR-based scan endpoint — the intended primary classification path once
+# real AS7343 sensor data + a trained classifier exist. Currently a stub:
+# it returns a clear "not ready yet" error rather than pretending to work,
+# so it fails loudly instead of silently returning nonsense.
+# ---------------------------------------------------------------------------
+
+nir_model = None  # populate once trained, e.g. via joblib.load("nir_classifier.pkl")
+
+NIR_EXPECTED_CHANNELS = 14  # AS7343 channel count
+
+
+@app.post("/nir-scan")
+async def nir_scan(payload: dict):
+    """
+    Expected payload:
+    {
+        "nir_reading": [ch1, ch2, ..., ch14],
+        "timestamp": "2026-07-19T15:22:05"   # optional
+    }
+    """
+    if nir_model is None:
+        return {"error": "NIR classifier not trained/loaded yet. See nir_readings.csv workflow."}
+
+    readings = payload.get("nir_reading")
+    if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
+        return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
+
+    import numpy as np  # local import: only needed once nir_model exists
+
+    X = np.array(readings).reshape(1, -1)
+    predicted_class = nir_model.predict(X)[0]
+    confidence = float(max(nir_model.predict_proba(X)[0]))
+
+    info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
+    route = "LEFT" if info["recyclable"] else "RIGHT"
+
+    result = {
+        "material": predicted_class,
+        "confidence": round(confidence * 100, 1),
+        "recyclable": info["recyclable"],
+        "reason": info["reason"],
+        "route": route,
+        "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
+    }
+
+    logger.info(f"NIR scan result: {result}")
+    await broadcast_result(result)
+
+    return {"route": route, "material": predicted_class, "confidence": result["confidence"]}
+
+
+# ---------------------------------------------------------------------------
 # Auto-scan loop — classifies the live camera feed without waiting for the
 # ESP32 to explicitly call /scan. Runs on a timer in the background: every
 # AUTO_SCAN_INTERVAL_SECONDS it grabs whatever frame the camera most
 # recently uploaded and runs it through YOLO, same as /scan does manually.
 #
-# This exists because there's no NIR sensor wired up yet — fuse_prediction()
-# just passes vision-only results through when nir_reading is empty, so
-# this loop reuses that same path. Once real NIR hardware exists, the
-# ESP32 can go back to calling /scan directly with both image + sensor
-# data, and this loop can be disabled (AUTO_SCAN_ENABLED = False) or left
-# running alongside it.
+# This exists as a demo/fallback path. Once the NIR classifier is the real
+# source of truth, this can be left running purely for display purposes
+# (showing what the camera "also thinks") or disabled entirely via
+# AUTO_SCAN_ENABLED = False.
 # ---------------------------------------------------------------------------
 AUTO_SCAN_ENABLED = True
 AUTO_SCAN_INTERVAL_SECONDS = 2.0
@@ -362,9 +473,14 @@ async def camera_upload(request: Request, x_api_key: str | None = Header(default
 
 
 @app.get("/camera/stream")
-async def camera_stream():
+async def camera_stream(token: str | None = None):
     """Re-serves the latest uploaded frame(s) as a multipart/x-mixed-replace
-    MJPEG stream, which browsers render natively inside a plain <img> tag."""
+    MJPEG stream, which browsers render natively inside a plain <img> tag.
+
+    Gated by the same shared-account token as /ws — pass it as
+    ?token=... in the URL, since <img> tags can't send custom headers."""
+    if not is_valid_token(token):
+        raise HTTPException(status_code=401, detail="Invalid or missing token.")
 
     async def frame_generator():
         boundary = b"--frame\r\n"
@@ -395,7 +511,11 @@ async def camera_status():
     """Tells the dashboard whether the camera feed is actually live right
     now — i.e. whether a real frame arrived within the last
     CAMERA_STALE_SECONDS — rather than just whether the MJPEG connection
-    to the browser happens to still be open (which it always is)."""
+    to the browser happens to still be open (which it always is).
+
+    Deliberately NOT gated by token: it reveals no image data, only a
+    boolean/timing status, and the dashboard polls it before knowing
+    whether login has completed in some edge cases."""
     if _latest_frame is None or _last_frame_time is None:
         return {"connected": False, "seconds_since_last_frame": None}
     elapsed = time.time() - _last_frame_time
@@ -403,9 +523,11 @@ async def camera_status():
 
 
 @app.get("/camera/latest.jpg")
-async def camera_latest():
+async def camera_latest(token: str | None = None):
     """Single-frame snapshot fallback — handy for testing with curl/browser,
     or for clients that can't render MJPEG."""
+    if not is_valid_token(token):
+        raise HTTPException(status_code=401, detail="Invalid or missing token.")
     if _latest_frame is None:
         raise HTTPException(status_code=404, detail="No frames received from the camera yet.")
     from fastapi.responses import Response
@@ -421,6 +543,7 @@ async def root():
     return {
         "status": "SpectraLink backend running",
         "model_loaded": model is not None,
+        "nir_model_loaded": nir_model is not None,
         "connected_dashboards": len(connected_clients),
         "camera_connected": _latest_frame is not None,
     }

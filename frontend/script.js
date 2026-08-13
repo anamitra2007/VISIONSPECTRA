@@ -108,6 +108,10 @@ tailwind.config = {
     let BACKEND_WS_URL = "wss://visionspectra.onrender.com/ws";
     const RECONNECT_DELAY_MS = 3000;
 
+    // localStorage key used to persist the login token across page
+    // refreshes/tabs. Single shared account, so no per-user namespacing.
+    const AUTH_TOKEN_KEY = "spectralink_token";
+
     // Derives the plain HTTP origin from the WS URL, for the Settings
     // page's health-check fetch (main.py's GET / endpoint) and for the
     // ESP32-CAM stream, which is proxied through the same backend so it
@@ -125,6 +129,69 @@ tailwind.config = {
 
     function cameraStreamUrl() {
         return backendHttpUrl() + CAMERA_STREAM_PATH;
+    }
+
+    // ------------------------------------------------------------------
+    // Auth — token storage + login/logout against the backend's shared
+    // single-account login (main.py: POST /login, POST /logout).
+    // ------------------------------------------------------------------
+    function getAuthToken() {
+        return localStorage.getItem(AUTH_TOKEN_KEY);
+    }
+
+    function setAuthToken(token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, token);
+    }
+
+    function clearAuthToken() {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+
+    // Called once we have a valid token (either just logged in, or found
+    // one already stored from a previous session) — brings the dashboard
+    // live by connecting the WebSocket and camera stream, both of which
+    // require the token to be accepted by the backend.
+    function unlockDashboard() {
+        connectWebSocket();
+        startCameraStream();
+        if (els.signInOpenBtn) {
+            els.signInOpenBtn.textContent = "Signed In";
+        }
+        if (els.signOutBtn) {
+            els.signOutBtn.classList.remove("hidden");
+        }
+    }
+
+    function lockDashboard() {
+        clearAuthToken();
+        if (socket) {
+            socket.onclose = null;
+            socket.onerror = null;
+            socket.close();
+            socket = null;
+        }
+        clearTimeout(reconnectTimer);
+        clearInterval(camStatusPollTimer);
+        showCameraFallback("CAM OFFLINE \u2014 sign in to view");
+        setConnectionStatus(false);
+        if (els.signInOpenBtn) {
+            els.signInOpenBtn.textContent = "Sign in";
+        }
+        if (els.signOutBtn) {
+            els.signOutBtn.classList.add("hidden");
+        }
+        openSignInModal();
+    }
+
+    function attemptLogin(username, password) {
+        return fetch(backendHttpUrl() + "login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+        }).then((res) => {
+            if (!res.ok) throw new Error("Invalid credentials");
+            return res.json();
+        });
     }
 
     // ------------------------------------------------------------------
@@ -147,7 +214,7 @@ tailwind.config = {
     // {{message}}, {{to_email}}, {{time}}.
     const EMAILJS_CONFIG = {
         SERVICE_ID: "service_i0zlalq",
-        TEMPLATE_ID:"template_nl1cjuc",
+        TEMPLATE_ID: "template_nl1cjuc",
         PUBLIC_KEY: "1VfqYsBhgKaKPDWBT",
         TO_EMAIL: "anamitra.laha2007@gmail.com",
     };
@@ -327,10 +394,14 @@ tailwind.config = {
 
             // Sign-in modal
             signInOpenBtn: document.getElementById("signInOpenBtn"),
+            signOutBtn: document.getElementById("signOutBtn"),
             signInModalOverlay: document.getElementById("signInModalOverlay"),
             signInModal: document.getElementById("signInModal"),
             signInCloseBtn: document.getElementById("signInCloseBtn"),
             signInForm: document.getElementById("signInForm"),
+            signInLogin: document.getElementById("signInLogin"),
+            signInPassword: document.getElementById("signInPassword"),
+            signInError: document.getElementById("signInError"),
         };
     }
 
@@ -407,8 +478,8 @@ tailwind.config = {
     }
 
     // Applies one real scan result (received over the WebSocket) to the UI.
-    // `data` shape (sent by main.py's /scan endpoint via broadcast_result):
-    //   { material, confidence, recyclable, reason, route, timestamp }
+    // `data` shape (sent by main.py's /scan or /nir-scan endpoint via
+    // broadcast_result): { material, confidence, recyclable, reason, route, timestamp }
     function applyBackendResult(data) {
         const materialId = (data.material || "OTHER").toUpperCase();
         const display = MATERIAL_DISPLAY[materialId] || MATERIAL_DISPLAY.OTHER;
@@ -447,9 +518,8 @@ tailwind.config = {
         els.routeArrowWrap.style.borderColor = recyclable ? "#adc6ff" : "#ffb4ab";
         els.routeArrowIcon.style.color = recyclable ? "#adc6ff" : "#ffb4ab";
 
-        // NIR bars / latency / FPS / servo / pressure: the backend doesn't
-        // stream this telemetry yet (no ESP32 attached), so these stay
-        // decorative/randomized until real sensor data is wired in.
+        // NIR bars / latency / FPS / servo / pressure: decorative/randomized
+        // until the real AS7343 telemetry is streamed alongside scan results.
         for (let i = 0; i < els.nirBars.length; i++) {
             els.nirBars[i].style.height = roundTo(rand(25, 100), 0) + "%";
         }
@@ -511,7 +581,7 @@ tailwind.config = {
         els.recyclablePct.textContent = total ? Math.round((recyclableCount / total) * 100) + "%" : "0%";
     }
 
-// ------------------------------------------------------------------
+    // ------------------------------------------------------------------
     // ESP32-CAM live stream
     // ------------------------------------------------------------------
     // The <img id="camStreamImg"> tag points permanently at the backend's
@@ -554,9 +624,11 @@ tailwind.config = {
 
     function startCameraStream() {
         if (!els.camStreamImg) return;
+        const token = getAuthToken();
+        if (!token) return; // gated — main.py's /camera/stream requires ?token=
         // Cache-bust so switching backend URLs (Settings page) doesn't
         // just reuse a cached broken image.
-        els.camStreamImg.src = cameraStreamUrl() + "?t=" + Date.now();
+        els.camStreamImg.src = cameraStreamUrl() + "?token=" + encodeURIComponent(token) + "&t=" + Date.now();
         clearInterval(camStatusPollTimer);
         pollCameraStatus(); // immediate check, don't wait for the first interval
         camStatusPollTimer = setInterval(pollCameraStatus, CAM_STATUS_POLL_MS);
@@ -564,7 +636,8 @@ tailwind.config = {
 
     function wireCameraStream() {
         if (!els.camStreamImg) return;
-        startCameraStream();
+        // Actual start happens from unlockDashboard() once a token exists —
+        // no point pointing the <img> at a stream we know will 401.
     }
 
     // ------------------------------------------------------------------
@@ -581,7 +654,13 @@ tailwind.config = {
     }
 
     function connectWebSocket() {
-        socket = new WebSocket(BACKEND_WS_URL);
+        const token = getAuthToken();
+        if (!token) {
+            setConnectionStatus(false);
+            return; // don't attempt a connection main.py will just reject
+        }
+
+        socket = new WebSocket(BACKEND_WS_URL + "?token=" + encodeURIComponent(token));
 
         socket.onopen = () => {
             clearTimeout(reconnectTimer);
@@ -593,14 +672,21 @@ tailwind.config = {
             try {
                 data = JSON.parse(event.data);
             } catch (e) {
-                console.error("Vision Spectra: could not parse message from backend", event.data);
+                console.error("SpectraLink: could not parse message from backend", event.data);
                 return;
             }
             applyBackendResult(data);
         };
 
-        socket.onclose = () => {
+        socket.onclose = (event) => {
             setConnectionStatus(false);
+            // 4401 = main.py's custom "unauthorized" close code. Retrying
+            // with the same bad/expired token would just loop forever, so
+            // force a fresh sign-in instead.
+            if (event.code === 4401) {
+                lockDashboard();
+                return;
+            }
             reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY_MS);
         };
 
@@ -621,7 +707,7 @@ tailwind.config = {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = "vision-spectra-sort-history-" + Date.now() + ".csv";
+        link.download = "spectralink-sort-history-" + Date.now() + ".csv";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1066,7 +1152,7 @@ tailwind.config = {
                 els.complaintForm.reset();
             })
             .catch((err) => {
-                console.error("Vision Spectra: EmailJS send failed", err);
+                console.error("SpectraLink: EmailJS send failed", err);
                 setComplaintStatus("error", "Couldn't send your complaint. Please try again in a moment.");
             })
             .finally(() => {
@@ -1082,7 +1168,6 @@ tailwind.config = {
             emailjs.init(EMAILJS_CONFIG.PUBLIC_KEY);
         }
 
-        
         if (els.sidebarSupportBtn) els.sidebarSupportBtn.addEventListener("click", openSupportModal);
         if (els.supportCloseBtn) els.supportCloseBtn.addEventListener("click", closeSupportModal);
         if (els.complaintCancelBtn) els.complaintCancelBtn.addEventListener("click", closeSupportModal);
@@ -1112,6 +1197,7 @@ tailwind.config = {
         signInModalPreviouslyFocused = document.activeElement;
         els.signInModalOverlay.style.display = "flex";
         document.body.style.overflow = "hidden";
+        if (els.signInLogin) els.signInLogin.focus();
     }
 
     function closeSignInModal() {
@@ -1123,9 +1209,24 @@ tailwind.config = {
         }
     }
 
+    function setSignInError(message) {
+        if (!els.signInError) {
+            if (message) alert(message); // fallback if index.html doesn't have the error element yet
+            return;
+        }
+        if (!message) {
+            els.signInError.classList.add("hidden");
+            els.signInError.textContent = "";
+            return;
+        }
+        els.signInError.textContent = message;
+        els.signInError.classList.remove("hidden");
+    }
+
     function wireSignInModal() {
         if (els.signInOpenBtn) els.signInOpenBtn.addEventListener("click", openSignInModal);
         if (els.signInCloseBtn) els.signInCloseBtn.addEventListener("click", closeSignInModal);
+        if (els.signOutBtn) els.signOutBtn.addEventListener("click", lockDashboard);
 
         if (els.signInModalOverlay) {
             els.signInModalOverlay.addEventListener("click", (event) => {
@@ -1139,15 +1240,38 @@ tailwind.config = {
             }
         });
 
-        // No backend wired up yet — just prevents an actual page navigation
-        // on submit until real auth logic is added.
         if (els.signInForm) {
             els.signInForm.addEventListener("submit", (event) => {
                 event.preventDefault();
+                setSignInError(null);
+
+                const username = els.signInLogin ? els.signInLogin.value.trim() : "";
+                const password = els.signInPassword ? els.signInPassword.value : "";
+
+                if (!username || !password) {
+                    setSignInError("Enter both a username and password.");
+                    return;
+                }
+
+                const submitBtn = els.signInForm.querySelector('button[type="submit"]');
+                if (submitBtn) submitBtn.disabled = true;
+
+                attemptLogin(username, password)
+                    .then((data) => {
+                        setAuthToken(data.token);
+                        closeSignInModal();
+                        unlockDashboard();
+                        els.signInForm.reset();
+                    })
+                    .catch(() => {
+                        setSignInError("Invalid username or password.");
+                    })
+                    .finally(() => {
+                        if (submitBtn) submitBtn.disabled = false;
+                    });
             });
         }
     }
-
 
     // ------------------------------------------------------------------
     // Navigation — toggles which <section id="view-*"> is visible and
@@ -1228,8 +1352,16 @@ tailwind.config = {
         wireSupportModal();
         wireSignInModal();
         wireCameraStream();
-        connectWebSocket();
-        setConnectionStatus(false);
+
+        // Auth gate: only connect the WebSocket/camera if a token from a
+        // previous session already exists. Otherwise, prompt for login —
+        // main.py rejects /ws and /camera/stream without a valid token.
+        if (getAuthToken()) {
+            unlockDashboard();
+        } else {
+            setConnectionStatus(false);
+            openSignInModal();
+        }
 
         if (els.exportDataBtn) {
             els.exportDataBtn.addEventListener("click", exportHistoryAsCsv);
