@@ -67,11 +67,11 @@ if YOLO is not None:
 # ---------------------------------------------------------------------------
 # Authentication — single shared account, token-based
 # ---------------------------------------------------------------------------
-# Set these as environment variables in production (Render → Environment
-# tab). The defaults below are only for local testing — change them
-# before sharing a public link.
-SITE_USERNAME = os.environ.get("SITE_USERNAME", "anamitra")
-SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "12345")
+# Shared dashboard credentials. These are intentionally set directly so the
+# deployed service uses the same credentials even if Render has old
+# environment-variable values configured.
+SITE_USERNAME = "anamitra"
+SITE_PASSWORD = "12345"
 
 # In-memory token store. Fine for a single shared account with no need
 # for per-user tracking — tokens are just "is this person allowed in."
