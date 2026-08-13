@@ -189,7 +189,9 @@ tailwind.config = {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username, password }),
         }).then((res) => {
-            if (!res.ok) throw new Error("Invalid credentials");
+            if (res.status === 401) throw new Error("Invalid username or password.");
+            if (res.status === 404) throw new Error("Login is not deployed on the backend yet. Deploy the latest backend commit on Render.");
+            if (!res.ok) throw new Error("The server could not complete the login (HTTP " + res.status + ").");
             return res.json();
         });
     }
@@ -1263,8 +1265,8 @@ tailwind.config = {
                         unlockDashboard();
                         els.signInForm.reset();
                     })
-                    .catch(() => {
-                        setSignInError("Invalid username or password.");
+                    .catch((error) => {
+                        setSignInError(error.message || "Could not reach the login server. Check the backend URL and try again.");
                     })
                     .finally(() => {
                         if (submitBtn) submitBtn.disabled = false;
