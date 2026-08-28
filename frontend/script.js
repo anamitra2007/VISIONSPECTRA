@@ -407,7 +407,9 @@ tailwind.config = {
         };
     }
 
-    let itemsSortedToday = 14203;
+    // Daily counters live in this browser so they survive refreshes but reset
+    // automatically when the local calendar day changes.
+    const DAILY_STATS_STORAGE_KEY = "spectralink_daily_stats_v1";
     let historyLog = [];
     let socket = null;
     let reconnectTimer = null;
@@ -430,6 +432,68 @@ tailwind.config = {
         const d = new Date(iso);
         if (isNaN(d.getTime())) return nowStamp();
         return d.toTimeString().split(" ")[0];
+    }
+
+    function localDayKey() {
+        const now = new Date();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return now.getFullYear() + "-" + month + "-" + day;
+    }
+
+    function emptyDailyStats() {
+        return { day: localDayKey(), total: 0, recyclable: 0, confidenceSum: 0 };
+    }
+
+    function getDailyStats() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(DAILY_STATS_STORAGE_KEY) || "null");
+            if (saved && saved.day === localDayKey() &&
+                Number.isFinite(saved.total) && Number.isFinite(saved.recyclable) && Number.isFinite(saved.confidenceSum)) {
+                return saved;
+            }
+        } catch (error) {
+            // Invalid or unavailable browser storage starts a fresh daily total.
+        }
+        return emptyDailyStats();
+    }
+
+    function saveDailyStats(stats) {
+        try {
+            localStorage.setItem(DAILY_STATS_STORAGE_KEY, JSON.stringify(stats));
+        } catch (error) {
+            // The current session can still show accurate counters if storage is unavailable.
+        }
+    }
+
+    function renderDailyStats() {
+        const stats = getDailyStats();
+        const recyclablePct = stats.total ? Math.round((stats.recyclable / stats.total) * 100) : 0;
+        const averageConfidence = stats.total ? roundTo(stats.confidenceSum / stats.total, 1) : 0;
+
+        if (els.itemsSortedCount) els.itemsSortedCount.textContent = stats.total.toLocaleString();
+        if (els.recyclablePct) els.recyclablePct.textContent = recyclablePct + "%";
+        if (els.modelAccuracy) els.modelAccuracy.textContent = averageConfidence.toFixed(1) + "%";
+    }
+
+    function recordDailyScan(recyclable, confidence) {
+        const stats = getDailyStats();
+        stats.total += 1;
+        if (recyclable) stats.recyclable += 1;
+        stats.confidenceSum += confidence;
+        saveDailyStats(stats);
+        renderDailyStats();
+    }
+
+    function scheduleDailyStatsReset() {
+        const now = new Date();
+        const nextMidnight = new Date(now);
+        nextMidnight.setHours(24, 0, 0, 0);
+        setTimeout(() => {
+            // getDailyStats detects the new date and displays a fresh total.
+            renderDailyStats();
+            scheduleDailyStatsReset();
+        }, nextMidnight.getTime() - now.getTime());
     }
 
     let HISTORY_COLLAPSED_COUNT = 4;
@@ -559,9 +623,8 @@ tailwind.config = {
                 ? "bg-green-500/10 text-green-400 border-green-500/30"
                 : "bg-error/10 text-error border-error/30");
 
-        // Stats
-        itemsSortedToday += 1;
-        els.itemsSortedCount.textContent = itemsSortedToday.toLocaleString();
+        // Daily stats are derived only from real backend scan results.
+        recordDailyScan(recyclable, confidence);
 
         // History (built from the real scan result)
         const entry = {
@@ -578,9 +641,6 @@ tailwind.config = {
         renderHistoryPage();
         updateAnalytics();
 
-        const recyclableCount = historyLog.slice(0, 20).filter((h) => h.recyclable).length;
-        const total = Math.min(historyLog.length, 20);
-        els.recyclablePct.textContent = total ? Math.round((recyclableCount / total) * 100) + "%" : "0%";
     }
 
     // ------------------------------------------------------------------
@@ -1354,6 +1414,8 @@ tailwind.config = {
         wireSupportModal();
         wireSignInModal();
         wireCameraStream();
+        renderDailyStats();
+        scheduleDailyStatsReset();
 
         // Auth gate: only connect the WebSocket/camera if a token from a
         // previous session already exists. Otherwise, prompt for login —
