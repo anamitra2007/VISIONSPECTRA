@@ -1,10 +1,10 @@
 """
 SpectraLink Backend
 --------------------
-Receives image + NIR sensor data from the ESP32 station, runs YOLO
-classification, fuses it with the sensor reading, looks up recyclability,
-decides a sort route, broadcasts the result to the dashboard over
-WebSocket, and returns the route so the ESP32 can drive the servo.
+Receives NIR sensor data from the ESP32 station, classifies the material,
+looks up recyclability, decides a sort route, broadcasts the result to the
+dashboard over WebSocket, and returns the route so the ESP32 can drive the
+servo.
 
 Also proxies a live MJPEG feed from an ESP32-CAM: the camera POSTs JPEG
 frames to /camera/upload, and the dashboard reads them back from
@@ -21,8 +21,6 @@ fine for a single shared account.
 """
 
 import asyncio
-import base64
-import io
 import logging
 import os
 import secrets
@@ -33,13 +31,6 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from PIL import Image
-
-try:
-    from ultralytics import YOLO
-except ImportError:  # allows the server to boot even before ultralytics is installed
-    YOLO = None
-
 try:
     import joblib
 except ImportError:  # allows the server to boot even before joblib is installed
@@ -62,17 +53,8 @@ app.add_middleware(
 )
 
 # Resolve artifacts from this file's directory rather than the process working
-# directory. Railway may start the service from the repository root, while the
-# model files live beside main.py in backend/.
+# directory. Railway may start the service from the repository root.
 ARTIFACTS_DIR = Path(__file__).resolve().parent
-MODEL_PATH = ARTIFACTS_DIR / "best.pt"
-model = None
-if YOLO is not None:
-    try:
-        model = YOLO(MODEL_PATH)
-        logger.info(f"Loaded model from {MODEL_PATH}")
-    except Exception as e:
-        logger.warning(f"Could not load {MODEL_PATH} yet: {e}")
 
 # ---------------------------------------------------------------------------
 # Authentication — single shared account, token-based
@@ -174,85 +156,6 @@ async def broadcast_result(result: dict):
 
 
 # ---------------------------------------------------------------------------
-# Fusion logic (placeholder — refine once real NIR calibration data exists)
-# ---------------------------------------------------------------------------
-
-def fuse_prediction(yolo_class: str, yolo_confidence: float, nir_reading: list):
-    """
-    Combine YOLO's vision-based guess with the NIR spectral reading.
-
-    For now this is a pass-through: it trusts YOLO's prediction as-is.
-    Once you have real sensor data, replace this with logic that compares
-    `nir_reading` against known reference spectral signatures per material
-    (e.g. nearest-neighbor match) and uses that to confirm or override
-    the vision-only guess — especially useful for the PS/PP confusion.
-    """
-    if not nir_reading:
-        return yolo_class, yolo_confidence
-
-    # TODO: real fusion logic goes here once NIR calibration data is collected.
-    return yolo_class, yolo_confidence
-
-
-# ---------------------------------------------------------------------------
-# Core scan endpoint — this is what the ESP32 calls (image-based path)
-# ---------------------------------------------------------------------------
-
-@app.post("/scan")
-async def scan_item(payload: dict):
-    """
-    Expected payload:
-    {
-        "image": "<base64 encoded JPEG>",
-        "nir_reading": [0.42, 0.38, 0.91, ...],   # optional
-        "timestamp": "2026-07-19T15:22:05"        # optional
-    }
-    """
-    if model is None:
-        return {"error": "Model not loaded. Place best.pt next to main.py and restart the server."}
-
-    if "image" not in payload:
-        return {"error": "Missing 'image' field in payload."}
-
-    # Decode the incoming image
-    try:
-        image_bytes = base64.b64decode(payload["image"])
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    except Exception as e:
-        return {"error": f"Could not decode image: {e}"}
-
-    # Run YOLO classification (offloaded to a thread so this blocking,
-    # CPU-bound call doesn't freeze /camera/stream or /camera/upload while
-    # it runs — same reasoning as auto_scan_loop's _classify_frame_sync).
-    results = await asyncio.to_thread(model, image, verbose=False)
-    predicted_class = results[0].names[results[0].probs.top1]
-    confidence = float(results[0].probs.top1conf)
-
-    # Fuse with NIR sensor reading
-    nir_reading = payload.get("nir_reading", [])
-    final_material, final_confidence = fuse_prediction(predicted_class, confidence, nir_reading)
-
-    # Look up recyclability
-    info = MATERIAL_INFO.get(final_material, {"recyclable": False, "reason": "Unknown material."})
-    route = "LEFT" if info["recyclable"] else "RIGHT"
-
-    result = {
-        "material": final_material,
-        "confidence": round(final_confidence * 100, 1),
-        "recyclable": info["recyclable"],
-        "reason": info["reason"],
-        "route": route,
-        "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
-    }
-
-    logger.info(f"Scan result: {result}")
-    await broadcast_result(result)
-
-    # This is what the ESP32 uses to decide which way to move the servo
-    return {"route": route, "material": final_material, "confidence": result["confidence"]}
-
-
-# ---------------------------------------------------------------------------
 # NIR-based scan endpoint — the intended primary classification path once
 # real AS7343 sensor data + a trained classifier exist. Currently a stub:
 # it returns a clear "not ready yet" error rather than pretending to work,
@@ -285,17 +188,33 @@ async def nir_scan(payload: dict):
         "nir_reading": [F1, F2, F3, F4, F5, F6, F7, F8, FZ, FY, FXL, NIR, Clear],  # 13 values, in this exact order
         "timestamp": "2026-07-19T15:22:05"   # optional
     }
+
+    The ESP32 may alternatively send the 13 readings as named fields, using
+    the same names as the training CSV (F1 through Clear). A CSV `Label`
+    field, if present, is ignored because the sensor does not know the class.
     """
     if nir_model is None:
         return {"error": "NIR classifier not trained/loaded yet. See nir_readings.csv workflow."}
 
     readings = payload.get("nir_reading")
+    if readings is None:
+        try:
+            readings = [payload[channel] for channel in NIR_FEATURE_ORDER]
+        except KeyError as e:
+            return {"error": f"Missing NIR channel: {e.args[0]}. Send all {NIR_EXPECTED_CHANNELS} channels."}
+
     if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
         return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
 
     import numpy as np  # local import: only needed once nir_model exists
 
-    X = np.array(readings).reshape(1, -1)
+    try:
+        X = np.asarray(readings, dtype=float).reshape(1, -1)
+    except (TypeError, ValueError):
+        return {"error": "All NIR channel values must be numeric."}
+    if not np.isfinite(X).all():
+        return {"error": "NIR channel values must be finite numbers."}
+
     predicted_class = nir_model.predict(X)[0]
     confidence = float(max(nir_model.predict_proba(X)[0]))
 
@@ -315,136 +234,6 @@ async def nir_scan(payload: dict):
     await broadcast_result(result)
 
     return {"route": route, "material": predicted_class, "confidence": result["confidence"]}
-
-
-# ---------------------------------------------------------------------------
-# Auto-scan loop — classifies the live camera feed without waiting for the
-# ESP32 to explicitly call /scan. Runs on a timer in the background: every
-# AUTO_SCAN_INTERVAL_SECONDS it grabs whatever frame the camera most
-# recently uploaded and runs it through YOLO, same as /scan does manually.
-#
-# This exists as a demo/fallback path. Once the NIR classifier is the real
-# source of truth, this can be left running purely for display purposes
-# (showing what the camera "also thinks") or disabled entirely via
-# AUTO_SCAN_ENABLED = False.
-# ---------------------------------------------------------------------------
-AUTO_SCAN_ENABLED = True
-AUTO_SCAN_INTERVAL_SECONDS = 2.0
-
-# Below this confidence, treat it as "nothing recognizable in frame" (e.g.
-# empty conveyor belt) rather than broadcasting a low-quality guess.
-AUTO_SCAN_CONFIDENCE_THRESHOLD = 0.60
-
-# Once an item is broadcast, don't broadcast it again on every single tick
-# while it just sits there — only re-broadcast if the detected material
-# changes, or after this many seconds have passed (a "heartbeat" so the
-# dashboard doesn't look stuck if the same item is still there).
-AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS = 8.0
-
-_auto_scan_last_material: str | None = None
-_auto_scan_last_broadcast_time: float = 0.0
-_auto_scan_last_processed_frame_time: float | None = None
-
-# Approximates where the dashboard's on-screen bounding-box reticle sits,
-# so auto-scan classifies roughly "what's inside the box" instead of the
-# entire frame (background, hands, conveyor edges, etc). This is only an
-# approximation — the reticle is CSS-positioned against a responsive video
-# panel with no pixel-exact link to the camera's actual resolution — so
-# it's expressed as a fraction of the frame, not fixed pixels.
-#
-# Box on screen is w-96 h-80 (384x320px, ~1.2:1 ratio). CROP_WIDTH_FRAC /
-# CROP_HEIGHT_FRAC control how much of the frame (centered) counts as
-# "inside the box." If you resize the box in index.html, update these to
-# match its new ratio.
-AUTO_SCAN_CROP_WIDTH_FRAC = 0.55   # fraction of frame width kept, centered
-AUTO_SCAN_CROP_HEIGHT_FRAC = 0.65  # fraction of frame height kept, centered
-
-
-def crop_to_bbox_region(image: Image.Image) -> Image.Image:
-    """Crops the center of `image` down to the region approximating where
-    the dashboard's bounding-box overlay sits, using AUTO_SCAN_CROP_WIDTH_FRAC
-    / AUTO_SCAN_CROP_HEIGHT_FRAC."""
-    w, h = image.size
-    crop_w = int(w * AUTO_SCAN_CROP_WIDTH_FRAC)
-    crop_h = int(h * AUTO_SCAN_CROP_HEIGHT_FRAC)
-    left = (w - crop_w) // 2
-    top = (h - crop_h) // 2
-    return image.crop((left, top, left + crop_w, top + crop_h))
-
-
-def _classify_frame_sync(frame_bytes: bytes):
-    """Runs the actual decode + crop + YOLO inference. Synchronous and
-    CPU-bound on purpose — this is meant to be called via
-    asyncio.to_thread(), never awaited directly, so it doesn't block the
-    event loop (which also needs to keep serving /camera/stream and
-    accepting /camera/upload while this runs)."""
-    image = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
-    image = crop_to_bbox_region(image)
-    results = model(image, verbose=False)
-    predicted_class = results[0].names[results[0].probs.top1]
-    confidence = float(results[0].probs.top1conf)
-    return predicted_class, confidence
-
-
-async def auto_scan_loop():
-    global _auto_scan_last_material, _auto_scan_last_broadcast_time, _auto_scan_last_processed_frame_time
-
-    while True:
-        await asyncio.sleep(AUTO_SCAN_INTERVAL_SECONDS)
-
-        if not AUTO_SCAN_ENABLED or model is None:
-            continue
-        if _latest_frame is None or _last_frame_time is None:
-            continue
-
-        # Skip if the camera feed has gone stale (ESP32-CAM disconnected) —
-        # no point re-classifying the same frozen frame over and over.
-        if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
-            continue
-
-        # Skip if we've already classified this exact frame (camera hasn't
-        # uploaded anything new since our last pass).
-        if _auto_scan_last_processed_frame_time == _last_frame_time:
-            continue
-        _auto_scan_last_processed_frame_time = _last_frame_time
-
-        try:
-            predicted_class, confidence = await asyncio.to_thread(_classify_frame_sync, _latest_frame)
-        except Exception as e:
-            logger.warning(f"Auto-scan: classification failed: {e}")
-            continue
-
-        if confidence < AUTO_SCAN_CONFIDENCE_THRESHOLD:
-            continue
-
-        now = time.time()
-        material_changed = predicted_class != _auto_scan_last_material
-        cooldown_elapsed = (now - _auto_scan_last_broadcast_time) >= AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS
-        if not material_changed and not cooldown_elapsed:
-            continue
-
-        info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
-        route = "LEFT" if info["recyclable"] else "RIGHT"
-
-        result = {
-            "material": predicted_class,
-            "confidence": round(confidence * 100, 1),
-            "recyclable": info["recyclable"],
-            "reason": info["reason"],
-            "route": route,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-        logger.info(f"Auto-scan result: {result}")
-        await broadcast_result(result)
-
-        _auto_scan_last_material = predicted_class
-        _auto_scan_last_broadcast_time = now
-
-
-@app.on_event("startup")
-async def start_auto_scan_loop():
-    asyncio.create_task(auto_scan_loop())
 
 
 # ---------------------------------------------------------------------------
@@ -565,7 +354,9 @@ async def camera_latest(token: str | None = None):
 async def root():
     return {
         "status": "SpectraLink backend running",
-        "model_loaded": model is not None,
+        # `model_loaded` remains for the dashboard's existing status display;
+        # the active classifier is now the NIR model, not an image model.
+        "model_loaded": nir_model is not None,
         "nir_model_loaded": nir_model is not None,
         "nir_expected_channels": NIR_EXPECTED_CHANNELS,
         "connected_dashboards": len(connected_clients),

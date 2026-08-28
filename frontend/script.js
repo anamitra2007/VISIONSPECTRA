@@ -480,7 +480,7 @@ tailwind.config = {
     }
 
     // Applies one real scan result (received over the WebSocket) to the UI.
-    // `data` shape (sent by main.py's /scan or /nir-scan endpoint via
+    // `data` shape (sent by main.py's /nir-scan endpoint via
     // broadcast_result): { material, confidence, recyclable, reason, route, timestamp }
     function applyBackendResult(data) {
         const materialId = (data.material || "OTHER").toUpperCase();
