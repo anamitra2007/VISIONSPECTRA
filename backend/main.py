@@ -39,6 +39,11 @@ try:
 except ImportError:  # allows the server to boot even before ultralytics is installed
     YOLO = None
 
+try:
+    import joblib
+except ImportError:  # allows the server to boot even before joblib is installed
+    joblib = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("spectralink")
 
@@ -249,9 +254,22 @@ async def scan_item(payload: dict):
 # so it fails loudly instead of silently returning nonsense.
 # ---------------------------------------------------------------------------
 
-nir_model = None  # populate once trained, e.g. via joblib.load("nir_classifier.pkl")
+# Feature order the model was trained on (see train_nir_classifier.py /
+# merge_csvs.py). The ESP32/serial_logger.py MUST send nir_reading values
+# in exactly this order — the model has no column names at inference time,
+# only positions.
+NIR_FEATURE_ORDER = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
+                      "FZ", "FY", "FXL", "NIR", "Clear"]
+NIR_EXPECTED_CHANNELS = len(NIR_FEATURE_ORDER)  # 13 — AS7343 8 spectral + FZ/FY/FXL + NIR + Clear
 
-NIR_EXPECTED_CHANNELS = 14  # AS7343 channel count
+NIR_MODEL_PATH = "nir_classifier.pkl"
+nir_model = None
+if joblib is not None:
+    try:
+        nir_model = joblib.load(NIR_MODEL_PATH)
+        logger.info(f"Loaded NIR classifier from {NIR_MODEL_PATH}")
+    except Exception as e:
+        logger.warning(f"Could not load {NIR_MODEL_PATH} yet: {e}")
 
 
 @app.post("/nir-scan")
@@ -259,7 +277,7 @@ async def nir_scan(payload: dict):
     """
     Expected payload:
     {
-        "nir_reading": [ch1, ch2, ..., ch14],
+        "nir_reading": [F1, F2, F3, F4, F5, F6, F7, F8, FZ, FY, FXL, NIR, Clear],  # 13 values, in this exact order
         "timestamp": "2026-07-19T15:22:05"   # optional
     }
     """
@@ -544,6 +562,7 @@ async def root():
         "status": "SpectraLink backend running",
         "model_loaded": model is not None,
         "nir_model_loaded": nir_model is not None,
+        "nir_expected_channels": NIR_EXPECTED_CHANNELS,
         "connected_dashboards": len(connected_clients),
         "camera_connected": _latest_frame is not None,
     }
