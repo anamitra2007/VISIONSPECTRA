@@ -1,6 +1,9 @@
 fastapi
 uvicorn[standard]
 ultralytics
+joblib
+numpy
+scikit-learn
 pillow
 python-multipart
 websockets

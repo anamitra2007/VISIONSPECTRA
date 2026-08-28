@@ -105,7 +105,7 @@ tailwind.config = {
     // Change this if the backend runs on a different machine/IP than the
     // one opening this page (e.g. "ws://192.168.1.42:8000/ws"). Mutable —
     // the Settings page can point this at a different backend at runtime.
-    let BACKEND_WS_URL = "wss://visionspectra.onrender.com/ws";
+    let BACKEND_WS_URL = "wss://ravishing-grace-production.up.railway.app/ws";
     const RECONNECT_DELAY_MS = 3000;
 
     // localStorage key used to persist the login token across page

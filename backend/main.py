@@ -28,6 +28,7 @@ import os
 import secrets
 import time
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,7 +61,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "best.pt"
+# Resolve artifacts from this file's directory rather than the process working
+# directory. Railway may start the service from the repository root, while the
+# model files live beside main.py in backend/.
+ARTIFACTS_DIR = Path(__file__).resolve().parent
+MODEL_PATH = ARTIFACTS_DIR / "best.pt"
 model = None
 if YOLO is not None:
     try:
@@ -262,7 +267,7 @@ NIR_FEATURE_ORDER = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
                       "FZ", "FY", "FXL", "NIR", "Clear"]
 NIR_EXPECTED_CHANNELS = len(NIR_FEATURE_ORDER)  # 13 — AS7343 8 spectral + FZ/FY/FXL + NIR + Clear
 
-NIR_MODEL_PATH = "nir_classifier.pkl"
+NIR_MODEL_PATH = ARTIFACTS_DIR / "nir_classifier.pkl"
 nir_model = None
 if joblib is not None:
     try:
