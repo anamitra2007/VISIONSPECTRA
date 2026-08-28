@@ -172,6 +172,7 @@ NIR_EXPECTED_CHANNELS = len(NIR_FEATURE_ORDER)  # 13 — AS7343 8 spectral + FZ/
 
 NIR_MODEL_PATH = ARTIFACTS_DIR / "nir_classifier.pkl"
 nir_model = None
+latest_nir_reading: list[float] | None = None
 if joblib is not None:
     try:
         nir_model = joblib.load(NIR_MODEL_PATH)
@@ -182,6 +183,8 @@ if joblib is not None:
 
 @app.post("/nir-scan")
 async def nir_scan(payload: dict):
+    global latest_nir_reading
+
     """
     Expected payload:
     {
@@ -214,6 +217,10 @@ async def nir_scan(payload: dict):
         return {"error": "All NIR channel values must be numeric."}
     if not np.isfinite(X).all():
         return {"error": "NIR channel values must be finite numbers."}
+
+    # Retain the latest sensor sample so the backend status page can show
+    # exactly what the ESP32 most recently sent.
+    latest_nir_reading = [int(value) if value.is_integer() else float(value) for value in X.flatten()]
 
     predicted_class = nir_model.predict(X)[0]
     confidence = float(max(nir_model.predict_proba(X)[0]))
@@ -359,6 +366,7 @@ async def root():
         "model_loaded": nir_model is not None,
         "nir_model_loaded": nir_model is not None,
         "nir_expected_channels": NIR_EXPECTED_CHANNELS,
+        "latest_nir_reading": latest_nir_reading,
         "connected_dashboards": len(connected_clients),
         "camera_connected": _latest_frame is not None,
     }
