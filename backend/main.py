@@ -75,8 +75,8 @@ if YOLO is not None:
 # Shared dashboard credentials. These are intentionally set directly so the
 # deployed service uses the same credentials even if Render has old
 # environment-variable values configured.
-SITE_USERNAME = "anamitra"
-SITE_PASSWORD = "12345"
+SITE_USERNAME = os.environ.get("SITE_USERNAME", "anamitra")
+SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "12345") 
 
 # In-memory token store. Fine for a single shared account with no need
 # for per-user tracking — tokens are just "is this person allowed in."
