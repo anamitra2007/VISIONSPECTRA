@@ -449,6 +449,9 @@ tailwind.config = {
       // supportTeamGrid: document.getElementById("supportTeamGrid"),
       supportChatSection: document.getElementById("supportChatSection"),
       supportExtrasSection: document.getElementById("supportExtrasSection"),
+      supportChatMessages: document.getElementById("supportChatMessages"),
+    supportChatForm: document.getElementById("supportChatForm"),
+    supportChatInput: document.getElementById("supportChatInput"),
 
       // Sign-in modal
       signInOpenBtn: document.getElementById("signInOpenBtn"),
@@ -1528,6 +1531,64 @@ tailwind.config = {
   }
 
   // ------------------------------------------------------------------
+// Support chat — simple rule-based Q&A, entirely client-side.
+// ------------------------------------------------------------------
+const CHAT_RULES = [
+    { keys: ["nir", "endpoint"], answer: "The NIR endpoint is POST /nir-scan on the backend. It takes AS7343 spectral readings and returns { material, confidence, recyclable, reason, route, timestamp }." },
+    { keys: ["sort", "route", "servo"], answer: "Recyclable items are routed LEFT and non-recyclables RIGHT (or vice versa depending on servo wiring) — the decision comes from the NIR classifier, and the Arduino/ESP32 drives the servo to match the 'route' field." },
+    { keys: ["camera", "cam", "offline"], answer: "If the camera badge shows CAM OFFLINE, the backend hasn't received a frame from the ESP32-CAM recently. Check that the ESP32-CAM is powered, on the same network, and POSTing to /camera/upload." },
+    { keys: ["total", "today", "stat"], answer: "Today's totals (Items Sorted, Recyclable %, Avg. Confidence) are shown on the Dashboard's stats row, calculated from scans received this session and reset at local midnight." },
+    { keys: ["sign in", "login", "token"], answer: "Sign in uses the shared account credentials configured on the backend. Once signed in, a token is stored in this browser and used for the WebSocket and camera stream." },
+];
+
+const CHAT_FALLBACK = "I don't have a specific answer for that yet — try asking about NIR scans, sorting routes, the camera stream, or today's totals, or use the Lodge a Complaint form for anything else.";
+
+function appendChatMessage(role, text) {
+    if (!els.supportChatMessages) return;
+    const wrap = document.createElement("div");
+    wrap.className = role === "user"
+        ? "flex justify-end"
+        : "flex justify-start";
+    const bubble = document.createElement("div");
+    bubble.className = role === "user"
+        ? "max-w-[80%] rounded-lg px-3 py-2 bg-primary text-on-primary text-sm"
+        : "max-w-[80%] rounded-lg px-3 py-2 bg-surface-container-highest text-on-surface text-sm";
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+    els.supportChatMessages.appendChild(wrap);
+    els.supportChatMessages.scrollTop = els.supportChatMessages.scrollHeight;
+}
+
+function answerChatQuestion(question) {
+    const q = question.toLowerCase();
+    const match = CHAT_RULES.find((rule) => rule.keys.some((k) => q.includes(k)));
+    return match ? match.answer : CHAT_FALLBACK;
+}
+
+function sendChatQuestion(question) {
+    const trimmed = (question || "").trim();
+    if (!trimmed) return;
+    appendChatMessage("user", trimmed);
+    setTimeout(() => appendChatMessage("bot", answerChatQuestion(trimmed)), 200);
+}
+
+function wireSupportChat() {
+    if (els.supportChatForm) {
+        els.supportChatForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const val = els.supportChatInput ? els.supportChatInput.value : "";
+            sendChatQuestion(val);
+            if (els.supportChatInput) els.supportChatInput.value = "";
+        });
+    }
+    document.querySelectorAll(".support-chat-suggestion").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            sendChatQuestion(btn.dataset.chatQuestion || btn.textContent);
+        });
+    });
+}
+
+  // ------------------------------------------------------------------
   // Sign In modal
   // ------------------------------------------------------------------
   let signInModalPreviouslyFocused = null;
@@ -1706,6 +1767,7 @@ tailwind.config = {
     wireHistoryPage();
     wireSettingsPage();
     wireSupportModal();
+    wireSupportChat();
     wireSignInModal();
     wireCameraStream();
     renderDailyStats();
