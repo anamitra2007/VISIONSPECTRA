@@ -17,7 +17,9 @@
          visibly snap into place a moment later. This hides the page until
          that settles, so there's nothing to see snap. -->
     <style>
-        body { visibility: hidden; }
+        body {
+            visibility: hidden;
+        }
     </style>
 
     <!-- Fonts (de-duplicated) -->
@@ -129,11 +131,12 @@
         <header
             class="h-20 flex justify-between items-center px-stack-lg border-b border-outline-variant/10 bg-surface/70 backdrop-blur-xl sticky top-0 z-50">
             <div class="flex items-center space-x-3 min-w-0">
-                <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Open navigation" aria-controls="appSidebar" aria-expanded="false">
+                <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-label="Open navigation"
+                    aria-controls="appSidebar" aria-expanded="false">
                     <span class="material-symbols-outlined">menu</span>
                 </button>
-                <div class="logo-mark" ></div>
-                
+                <div class="logo-mark"></div>
+
                 <span class="font-headline-md text-headline-md text-on-surface hidden sm:inline">SpectraLink</span>
 
             </div>
@@ -148,17 +151,18 @@
                             class="font-body-md text-on-surface font-semibold uppercase tracking-widest text-[14px]">Scanning</span>
                     </div>
                 </div>
-                
+
                 <div class="flex items-center space-x-4">
                     <button type="button" class="text-primary" aria-label="Sensor status">
                         <span class="material-symbols-outlined">sensors</span>
                     </button>
-                   
+
 
                     <!-- profile of the user -->
 
-                    <button type="button" id="signInOpenBtn" class="w-20 avatar-badge avatar-badge" aria-label="Technician on shift">Sign in
-                     </button>
+                    <button type="button" id="signInOpenBtn" class="w-20 avatar-badge avatar-badge"
+                        aria-label="Technician on shift">Sign in
+                    </button>
                     <button type="button" id="signOutBtn"
                         class="hidden font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface px-3 py-2 rounded-lg border border-outline-variant/30 transition-colors"
                         aria-label="Sign out">Sign out</button>
@@ -173,7 +177,8 @@
             <!-- Top Section: Live Detection & Material ID -->
             <div class="grid grid-cols-12 gap-gutter items-start">
                 <!-- Live Detection Panel -->
-                <div class="col-span-12 lg:col-span-8 glass-panel rounded-xl overflow-hidden active-glow relative min-h-[560px]">
+                <div
+                    class="col-span-12 lg:col-span-8 glass-panel rounded-xl overflow-hidden active-glow relative min-h-[560px]">
                     <div class="absolute top-4 left-4 z-20 flex space-x-2">
                         <span
                             class="px-2 py-1 bg-error/20 border border-error/40 text-error font-mono-data text-mono-data rounded flex items-center space-x-1">
@@ -198,7 +203,7 @@
                         <div class="conveyor-item" id="conveyorItem"></div>
                     </div>
 
-                    
+
                     <!-- Bounding Box Overlay -->
                     <div class="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
                         <div class="w-96 h-80 border-2 border-primary relative">
@@ -236,17 +241,17 @@
                             </div>
                         </div>
                         <div class="text-right">
-                            <p class="font-mono-data text-mono-data text-on-surface-variant">LATENCY: 
-                                
-                                <!-- change -->
-                                <span
-                                    id="latencyText">12</span>ms</p>
-                            <p class="font-mono-data text-mono-data text-on-surface-variant">FPS: 
-                                
-                                 <!-- change -->
+                            <p class="font-mono-data text-mono-data text-on-surface-variant">LATENCY:
 
-                                <span
-                                    id="fpsText">60.0</span></p>
+                                <!-- change -->
+                                <span id="latencyText">12</span>ms
+                            </p>
+                            <p class="font-mono-data text-mono-data text-on-surface-variant">FPS:
+
+                                <!-- change -->
+
+                                <span id="fpsText">60.0</span>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -259,7 +264,7 @@
                                 <span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Current
                                     Material</span>
 
-                                    <!-- change -->
+                                <!-- change -->
 
                                 <span id="materialBadge"
                                     class="bg-surface-container-highest text-on-surface-variant border border-outline-variant px-3 py-1 rounded-full font-label-caps text-label-caps">Standby</span>
@@ -267,13 +272,15 @@
 
                             <!-- Change -->
 
-                            <h2 id="materialName" class="font-headline-xl text-headline-xl text-primary leading-none mb-2">
+                            <h2 id="materialName"
+                                class="font-headline-xl text-headline-xl text-primary leading-none mb-2">
                                 &mdash;</h2>
                             <p id="materialConfidence" class="font-headline-md text-headline-md text-secondary mb-6">
                                 <!-- change -->
-                               Waiting for first scan&hellip;</p>
+                                Waiting for first scan&hellip;
+                            </p>
 
-                               <!-- change  -->
+                            <!-- change  -->
                             <p id="materialDesc" class="font-body-md text-on-surface-variant leading-relaxed">
                                 No item has been scanned yet. Run a scan from the backend
                                 (test_scan.py, or the ESP32 once connected) and results will
@@ -302,8 +309,8 @@
                                 <span class="font-label-caps text-label-caps text-primary uppercase block mb-1">Decision
                                     Engine</span>
 
-                                    <!-- change -->
-                                     
+                                <!-- change -->
+
                                 <span id="routeText" class="font-headline-md text-headline-md text-on-surface">Route:
                                     &mdash;</span>
                             </div>
@@ -339,10 +346,9 @@
                                     <stop offset="100%" stop-color="#adc6ff" stop-opacity="0"></stop>
                                 </linearGradient>
                             </defs>
-                            <path id="spectralFill" d="M0 100 L0 50 L100 50 L 100 100 Z"
-                                fill="url(#lineGrad)"></path>
-                            <path id="spectralLine" d="M0 50 L100 50" fill="none"
-                                stroke="#adc6ff" stroke-linecap="round" stroke-width="2"></path>
+                            <path id="spectralFill" d="M0 100 L0 50 L100 50 L 100 100 Z" fill="url(#lineGrad)"></path>
+                            <path id="spectralLine" d="M0 50 L100 50" fill="none" stroke="#adc6ff"
+                                stroke-linecap="round" stroke-width="2"></path>
                             <circle id="spectralPeak" cx="80" cy="10" fill="#ffb95f" r="3" style="display: none;">
                                 <title id="spectralPeakTitle">Awaiting first scan</title>
                             </circle>
@@ -366,7 +372,8 @@
                         </div>
                         <h4 class="font-headline-md text-headline-md text-on-surface mb-2">Sorter Mechanism</h4>
                         <p class="font-body-md text-on-surface-variant max-w-xs mx-auto">Active sorting arm position:
-                            <span id="servoAngle" class="text-secondary">42.5° Offset</span></p>
+                            <span id="servoAngle" class="text-secondary">42.5° Offset</span>
+                        </p>
                         <div class="mt-6 flex justify-center space-x-2">
                             <div id="pneumaticsStatus"
                                 class="px-3 py-1 rounded bg-green-500/10 text-green-400 font-label-caps text-[10px] border border-green-500/30">
@@ -638,7 +645,8 @@
                     </div>
                     <p class="font-body-md text-on-surface-variant text-sm mt-2">Point this at your FastAPI
                         backend's <code class="text-primary">/ws</code> endpoint. Defaults to
-                        <code class="text-primary">ws://127.0.0.1:8000/ws</code> for local development.</p>
+                        <code class="text-primary">ws://127.0.0.1:8000/ws</code> for local development.
+                    </p>
                 </div>
                 <div class="pt-2 border-t border-outline-variant/10 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                     <div>
@@ -726,11 +734,14 @@
 
                 <div class="p-6 space-y-6">
                     <!-- Rule-based support chatbot; answers remain entirely in this browser. -->
-                    <section aria-labelledby="supportChatTitle">
+                    <section id="supportChatSection" aria-labelledby="supportChatTitle">
                         <div class="flex items-center justify-between gap-4 mb-3">
                             <div>
-                                <h3 id="supportChatTitle" class="font-label-caps text-label-caps text-on-surface-variant uppercase">Support Assistant</h3>
-                                <p class="text-sm text-on-surface-variant mt-1">Ask about NIR scans, camera streaming, sorting, or the dashboard.</p>
+                                <h3 id="supportChatTitle"
+                                    class="font-label-caps text-label-caps text-on-surface-variant uppercase">Support
+                                    Assistant</h3>
+                                <p class="text-sm text-on-surface-variant mt-1">Ask about NIR scans, camera streaming,
+                                    sorting, or the dashboard.</p>
                             </div>
                             <span class="material-symbols-outlined text-primary" aria-hidden="true">smart_toy</span>
                         </div>
@@ -738,26 +749,32 @@
                             class="h-64 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface-container-low p-3 space-y-3">
                         </div>
                         <div class="flex flex-wrap gap-2 mt-3" aria-label="Suggested support questions">
-                            <button type="button" data-chat-question="What is the NIR endpoint?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">NIR endpoint</button>
-                            <button type="button" data-chat-question="How does sorting work?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Sorting routes</button>
-                            <button type="button" data-chat-question="Why is the camera offline?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Camera offline</button>
-                            <button type="button" data-chat-question="How do I view today's totals?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Today’s totals</button>
+                            <button type="button" data-chat-question="What is the NIR endpoint?"
+                                class="support-chat-suggestion">NIR endpoint</button>
+                            <button type="button" data-chat-question="How does sorting work?"
+                                class="support-chat-suggestion">Sorting routes</button>
+                            <button type="button" data-chat-question="Why is the camera offline?"
+                                class="support-chat-suggestion">Camera offline</button>
+                            <button type="button" data-chat-question="How do I view today's totals?"
+                                class="support-chat-suggestion">Today’s totals</button>
                         </div>
                         <form id="supportChatForm" class="flex gap-2 mt-3">
                             <label for="supportChatInput" class="sr-only">Ask the support assistant</label>
                             <input id="supportChatInput" type="text" autocomplete="off" maxlength="300"
                                 placeholder="Ask a question about SpectraLink..."
                                 class="min-w-0 flex-1 bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
-                            <button type="submit" class="bg-primary text-on-primary rounded-lg px-4 py-2.5 active:scale-95 transition-transform" aria-label="Send support question">
+                            <button type="submit"
+                                class="bg-primary text-on-primary rounded-lg px-4 py-2.5 active:scale-95 transition-transform"
+                                aria-label="Send support question">
                                 <span class="material-symbols-outlined text-[18px]">send</span>
                             </button>
                         </form>
                     </section>
 
                     <!-- Team cards -->
+                    <div id="supportExtrasSection">
                     <div>
-                        <h3
-                            class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-3">Team
+                        <h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-3">Team
                             Members</h3>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="supportTeamGrid">
                             <!-- 4 team cards rendered by script.js from TEAM_MEMBERS -->
@@ -786,7 +803,7 @@
                                         placeholder="jane@example.com"
                                         class="w-full bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
                                 </div>
-                         </div>
+                            </div>
                             <div>
                                 <label for="complaintMessage"
                                     class="font-label-caps text-label-caps text-on-surface-variant block mb-2">Complaint
@@ -814,7 +831,8 @@
                 </div>
             </div>
         </div>
-        
+        </div>
+
         <!-- ================= Sign In Modal ================= -->
         <div id="signInModalOverlay" style="display: none;"
             class="fixed inset-0 z-[100] bg-surface-container-lowest/80 backdrop-blur-sm items-center justify-center p-4">
@@ -824,9 +842,13 @@
                 <!-- Decorative atmosphere, scoped to this modal only (not
                      fixed to the viewport like a full-page version would be) -->
                 <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                    <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full"></div>
-                    <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-tertiary/5 blur-[120px] rounded-full"></div>
-                    
+                    <div
+                        class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[120px] rounded-full">
+                    </div>
+                    <div
+                        class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-tertiary/5 blur-[120px] rounded-full">
+                    </div>
+
                 </div>
 
                 <button type="button" id="signInCloseBtn" aria-label="Close sign in dialog"
@@ -836,64 +858,89 @@
 
                 <div class="relative z-10 grid grid-cols-1 md:grid-cols-2">
                     <!-- Left Column: Sign-in Form -->
-                    <section class="p-card-padding md:p-stack-lg flex flex-col justify-center border-b md:border-b-0 md:border-r border-outline-variant/10">
+                    <section
+                        class="p-card-padding md:p-stack-lg flex flex-col justify-center border-b md:border-b-0 md:border-r border-outline-variant/10">
                         <div class="mb-stack-md">
-                            <h1 id="signInModalTitle" class="font-headline-lg text-headline-lg text-on-surface mb-2">Sign in to SpectraLink</h1>
-                            <p class="text-on-surface-variant">Enter the shared account credentials to view the live terminal.</p>
+                            <h1 id="signInModalTitle" class="font-headline-lg text-headline-lg text-on-surface mb-2">
+                                Sign in to SpectraLink</h1>
+                            <p class="text-on-surface-variant">Enter the shared account credentials to view the live
+                                terminal.</p>
                         </div>
                         <form id="signInForm" class="space-y-stack-md">
                             <!-- Username/Email -->
                             <div class="space-y-base">
-                                <label class="font-label-caps text-label-caps text-on-surface-variant block" for="signInLogin">Username</label>
+                                <label class="font-label-caps text-label-caps text-on-surface-variant block"
+                                    for="signInLogin">Username</label>
                                 <div class="relative">
-                                    <input class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg px-4 py-3 outline-none glow-border text-on-surface transition-all placeholder:opacity-30" id="signInLogin" placeholder="spectralink" type="text" autocomplete="username" />
-                                    <span class="material-symbols-outlined absolute right-4 top-3 text-outline text-[20px]">alternate_email</span>
+                                    <input
+                                        class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg px-4 py-3 outline-none glow-border text-on-surface transition-all placeholder:opacity-30"
+                                        id="signInLogin" placeholder="spectralink" type="text"
+                                        autocomplete="username" />
+                                    <span
+                                        class="material-symbols-outlined absolute right-4 top-3 text-outline text-[20px]">alternate_email</span>
                                 </div>
                             </div>
                             <!-- Password -->
                             <div class="space-y-base">
                                 <div class="flex justify-between items-center">
-                                    <label class="font-label-caps text-label-caps text-on-surface-variant block" for="signInPassword">Password</label>
+                                    <label class="font-label-caps text-label-caps text-on-surface-variant block"
+                                        for="signInPassword">Password</label>
                                 </div>
                                 <div class="relative">
-                                    <input class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg px-4 py-3 outline-none glow-border text-on-surface transition-all placeholder:opacity-30" id="signInPassword" placeholder="••••••••" type="password" autocomplete="current-password" />
-                                    <span class="material-symbols-outlined absolute right-4 top-3 text-outline text-[20px]">lock</span>
+                                    <input
+                                        class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg px-4 py-3 outline-none glow-border text-on-surface transition-all placeholder:opacity-30"
+                                        id="signInPassword" placeholder="••••••••" type="password"
+                                        autocomplete="current-password" />
+                                    <span
+                                        class="material-symbols-outlined absolute right-4 top-3 text-outline text-[20px]">lock</span>
                                 </div>
                             </div>
 
                             <!-- Error message -->
-                            <div id="signInError" class="hidden font-body-md text-sm rounded-lg px-4 py-3 bg-error/10 text-error border border-error/30"></div>
+                            <div id="signInError"
+                                class="hidden font-body-md text-sm rounded-lg px-4 py-3 bg-error/10 text-error border border-error/30">
+                            </div>
 
                             <!-- Sign In Button -->
-                            <button class="w-full bg-primary hover:bg-primary/90 text-on-primary font-headline-md py-4 rounded-lg transition-all active:scale-[0.98] shadow-lg shadow-primary/20 flex items-center justify-center gap-2 mt-stack-md group" type="submit">
+                            <button
+                                class="w-full bg-primary hover:bg-primary/90 text-on-primary font-headline-md py-4 rounded-lg transition-all active:scale-[0.98] shadow-lg shadow-primary/20 flex items-center justify-center gap-2 mt-stack-md group"
+                                type="submit">
                                 Sign in
-                                <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
+                                <span
+                                    class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
                             </button>
                         </form>
 
                     </section>
 
                     <!-- Right Column: Brand Showcase -->
-                    <section class="relative bg-surface-container-low/30 flex flex-col items-center justify-center p-card-padding text-center overflow-hidden">
+                    <section
+                        class="relative bg-surface-container-low/30 flex flex-col items-center justify-center p-card-padding text-center overflow-hidden">
                         <div class="relative z-10 w-full max-w-[320px]">
                             <div class="mb-stack-lg relative group flex justify-center">
-                                <div class="absolute -inset-10 bg-primary/10 blur-[60px] rounded-full group-hover:bg-primary/20 transition-all duration-700"></div>
-                                <div class="logo-mark relative z-20" style="width: 80%; height: 285px; border-radius: 16px;"></div>
+                                <div
+                                    class="absolute -inset-10 bg-primary/10 blur-[60px] rounded-full group-hover:bg-primary/20 transition-all duration-700">
+                                </div>
+                                <div class="logo-mark relative z-20"
+                                    style="width: 80%; height: 285px; border-radius: 16px;"></div>
                             </div>
                             <div class="space-y-stack-sm relative z-20">
                                 <div class="h-[2px] w-12 bg-primary mx-auto mb-gutter"></div>
                                 <p class="font-body-md text-on-surface leading-relaxed px-gutter">
-                                    <span class="font-bold text-primary">SpectraLink:</span> Advancing the future of industrial waste management through high-precision NIR spectral sensing.
+                                    <span class="font-bold text-primary">SpectraLink:</span> Advancing the future of
+                                    industrial waste management through high-precision NIR spectral sensing.
                                 </p>
                                 <div class="pt-stack-md flex justify-center gap-4">
                                     <div class="flex flex-col items-center">
                                         <span class="font-mono-data text-mono-data text-secondary">NIR</span>
-                                        <span class="font-label-caps text-label-caps text-on-surface-variant/60">CLASSIFICATION</span>
+                                        <span
+                                            class="font-label-caps text-label-caps text-on-surface-variant/60">CLASSIFICATION</span>
                                     </div>
                                     <div class="w-[1px] h-8 bg-outline-variant/20"></div>
                                     <div class="flex flex-col items-center">
                                         <span class="font-mono-data text-mono-data text-secondary">REAL-TIME</span>
-                                        <span class="font-label-caps text-label-caps text-on-surface-variant/60">SORTING</span>
+                                        <span
+                                            class="font-label-caps text-label-caps text-on-surface-variant/60">SORTING</span>
                                     </div>
                                 </div>
                             </div>
