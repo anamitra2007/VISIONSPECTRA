@@ -713,10 +713,10 @@
                 <div
                     class="sticky top-0 bg-surface-container/95 backdrop-blur-lg p-6 border-b border-outline-variant/10 flex justify-between items-center z-10">
                     <div>
-                        <h2 id="supportModalTitle" class="font-headline-md text-headline-md text-on-surface">Support &
-                            Team</h2>
-                        <p class="font-body-md text-on-surface-variant text-sm mt-1">Reach the team behind
-                            SpectraLink, or lodge a complaint directly.</p>
+                        <h2 id="supportModalTitle" class="font-headline-md text-headline-md text-on-surface">Support
+                            Assistant & Team</h2>
+                        <p class="font-body-md text-on-surface-variant text-sm mt-1">Ask a project question or reach
+                            the SpectraLink team.</p>
                     </div>
                     <button type="button" id="supportCloseBtn" aria-label="Close support dialog"
                         class="w-9 h-9 rounded-full bg-surface-container-highest hover:bg-surface-container-highest/70 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors flex-shrink-0">
@@ -725,6 +725,35 @@
                 </div>
 
                 <div class="p-6 space-y-6">
+                    <!-- Rule-based support chatbot; answers remain entirely in this browser. -->
+                    <section aria-labelledby="supportChatTitle">
+                        <div class="flex items-center justify-between gap-4 mb-3">
+                            <div>
+                                <h3 id="supportChatTitle" class="font-label-caps text-label-caps text-on-surface-variant uppercase">Support Assistant</h3>
+                                <p class="text-sm text-on-surface-variant mt-1">Ask about NIR scans, camera streaming, sorting, or the dashboard.</p>
+                            </div>
+                            <span class="material-symbols-outlined text-primary" aria-hidden="true">smart_toy</span>
+                        </div>
+                        <div id="supportChatMessages" role="log" aria-live="polite"
+                            class="h-64 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface-container-low p-3 space-y-3">
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-3" aria-label="Suggested support questions">
+                            <button type="button" data-chat-question="What is the NIR endpoint?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">NIR endpoint</button>
+                            <button type="button" data-chat-question="How does sorting work?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Sorting routes</button>
+                            <button type="button" data-chat-question="Why is the camera offline?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Camera offline</button>
+                            <button type="button" data-chat-question="How do I view today's totals?" class="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20">Today’s totals</button>
+                        </div>
+                        <form id="supportChatForm" class="flex gap-2 mt-3">
+                            <label for="supportChatInput" class="sr-only">Ask the support assistant</label>
+                            <input id="supportChatInput" type="text" autocomplete="off" maxlength="300"
+                                placeholder="Ask a question about SpectraLink..."
+                                class="min-w-0 flex-1 bg-surface-container-high rounded-lg border border-outline-variant/30 px-4 py-2.5 text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary" />
+                            <button type="submit" class="bg-primary text-on-primary rounded-lg px-4 py-2.5 active:scale-95 transition-transform" aria-label="Send support question">
+                                <span class="material-symbols-outlined text-[18px]">send</span>
+                            </button>
+                        </form>
+                    </section>
+
                     <!-- Team cards -->
                     <div>
                         <h3

@@ -393,6 +393,9 @@ tailwind.config = {
             complaintStatus: document.getElementById("complaintStatus"),
             complaintSubmitBtn: document.getElementById("complaintSubmitBtn"),
             complaintCancelBtn: document.getElementById("complaintCancelBtn"),
+            supportChatMessages: document.getElementById("supportChatMessages"),
+            supportChatForm: document.getElementById("supportChatForm"),
+            supportChatInput: document.getElementById("supportChatInput"),
 
             // Sign-in modal
             signInOpenBtn: document.getElementById("signInOpenBtn"),
@@ -1134,6 +1137,49 @@ tailwind.config = {
         TEAM_MEMBERS.forEach((member) => els.supportTeamGrid.appendChild(buildTeamCard(member)));
     }
 
+    const SUPPORT_CHAT_DEFAULT_REPLY = "I can help with NIR scans, material sorting, the ESP32-CAM, live video, dashboard totals, history, and login. Try asking about one of those topics.";
+
+    function getSupportChatReply(question) {
+        const text = question.toLowerCase().trim();
+        if (/\b(hi|hello|hey)\b/.test(text)) return "Hello! How can I help with SpectraLink today?";
+        if (/(nir|endpoint|f1|f2|clear|sensor reading)/.test(text)) return "Send the 13 NIR values to POST https://ravishing-grace-production.up.railway.app/nir-scan. The accepted order is F1, F2, F3, F4, F5, F6, F7, F8, FZ, FY, FXL, NIR, Clear.";
+        if (/(route|sort|servo|plastic type|material|hdpe|ldpe|pet|pvc|\bpp\b)/.test(text)) return "The NIR model returns a material such as PET, HDPE, PP, LDPE, PVC, or OTHER. The backend currently routes PET, HDPE, and PP to LEFT; LDPE, PVC, and OTHER to RIGHT. Hardware can use the returned material to select its servo position.";
+        if (/(camera|video|stream|esp32-cam|offline|frame)/.test(text)) return "The ESP32-CAM uploads JPEG images to /camera/upload. The backend turns the latest uploads into the live browser stream at /camera/stream. If the camera is offline, check ESP32-CAM power, Wi-Fi, the upload URL, and the CAMERA_API_KEY value.";
+        if (/(today|total|recyclable|confidence|accuracy|stat)/.test(text)) return "The dashboard totals are based on real NIR scan results received today in this browser. They reset at local midnight. “Avg. Model Confidence” is the average prediction confidence, not verified real-world accuracy.";
+        if (/(history|export|csv|account|database)/.test(text)) return "Current history is session-based in the browser. For permanent account-specific history and full exports, the backend needs user accounts plus a database such as PostgreSQL.";
+        if (/(login|sign in|password|token)/.test(text)) return "Use the Sign in button with the configured dashboard credentials. A successful login gives the browser a temporary token for the live WebSocket and camera stream.";
+        return SUPPORT_CHAT_DEFAULT_REPLY;
+    }
+
+    function appendSupportChatMessage(sender, message) {
+        if (!els.supportChatMessages) return;
+        const item = document.createElement("div");
+        const isUser = sender === "You";
+        item.className = "rounded-lg px-3 py-2 text-sm leading-relaxed " +
+            (isUser ? "bg-primary/15 text-on-surface ml-8" : "bg-surface-container-high text-on-surface-variant mr-8");
+        const label = document.createElement("p");
+        label.className = "font-label-caps text-label-caps " + (isUser ? "text-primary" : "text-secondary") + " mb-1";
+        label.textContent = sender;
+        const body = document.createElement("p");
+        body.textContent = message;
+        item.append(label, body);
+        els.supportChatMessages.appendChild(item);
+        els.supportChatMessages.scrollTop = els.supportChatMessages.scrollHeight;
+    }
+
+    function askSupportChat(question) {
+        const cleanQuestion = (question || "").trim();
+        if (!cleanQuestion) return;
+        appendSupportChatMessage("You", cleanQuestion);
+        appendSupportChatMessage("SpectraLink Assistant", getSupportChatReply(cleanQuestion));
+        if (els.supportChatInput) els.supportChatInput.value = "";
+    }
+
+    function initializeSupportChat() {
+        if (!els.supportChatMessages || els.supportChatMessages.childElementCount) return;
+        appendSupportChatMessage("SpectraLink Assistant", "Hi! I’m the local SpectraLink support assistant. Ask about NIR readings, sorting, the camera, or dashboard data.");
+    }
+
     let supportModalPreviouslyFocused = null;
 
     function openSupportModal() {
@@ -1142,7 +1188,8 @@ tailwind.config = {
         els.supportModalOverlay.style.display = "flex";
         document.body.style.overflow = "hidden";
         setComplaintStatus(null);
-        if (els.complaintName) els.complaintName.focus();
+        initializeSupportChat();
+        if (els.supportChatInput) els.supportChatInput.focus();
     }
 
     function closeSupportModal() {
@@ -1247,6 +1294,15 @@ tailwind.config = {
         });
 
         if (els.complaintForm) els.complaintForm.addEventListener("submit", handleComplaintSubmit);
+        if (els.supportChatForm) {
+            els.supportChatForm.addEventListener("submit", (event) => {
+                event.preventDefault();
+                askSupportChat(els.supportChatInput ? els.supportChatInput.value : "");
+            });
+        }
+        document.querySelectorAll("[data-chat-question]").forEach((button) => {
+            button.addEventListener("click", () => askSupportChat(button.dataset.chatQuestion));
+        });
     }
 
     // ------------------------------------------------------------------
