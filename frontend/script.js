@@ -658,6 +658,11 @@ tailwind.config = {
     els.materialConfidence.textContent = confidence + "% Confidence";
     els.materialDesc.textContent = data.reason || display.desc;
     els.materialProperties.textContent = "Properties: " + display.properties;
+    if (data.source === "nir+image") {
+      els.materialProperties.textContent += " · NIR + Image";
+    } else if (data.source === "nir") {
+      els.materialProperties.textContent += " · NIR only";
+    }
 
     if (recyclable) {
       els.materialBadge.textContent = "Recyclable";
@@ -1534,8 +1539,8 @@ tailwind.config = {
 // Support chat — simple rule-based Q&A, entirely client-side.
 // ------------------------------------------------------------------
 const CHAT_RULES = [
-    { keys: ["nir", "endpoint"], answer: "The NIR endpoint is POST /nir-scan on the backend. It takes AS7343 spectral readings and returns { material, confidence, recyclable, reason, route, timestamp }." },
-    { keys: ["sort", "route", "servo"], answer: "Recyclable items are routed LEFT and non-recyclables RIGHT (or vice versa depending on servo wiring) — the decision comes from the NIR classifier, and the Arduino/ESP32 drives the servo to match the 'route' field." },
+    { keys: ["nir", "endpoint"], answer: "The NIR endpoint is still POST /nir-scan. It takes AS7343 spectral readings, fuses them with the latest camera frame already stored from POST /camera/upload, and returns { material, confidence, recyclable, reason, route, timestamp }." },
+    { keys: ["sort", "route", "servo"], answer: "Recyclable items are routed LEFT and non-recyclables RIGHT. The decision fuses the NIR classifier with the latest ESP32-CAM frame inside POST /nir-scan (same endpoint — the ESP32 still sends only spectral readings). The Arduino/ESP32 drives the servo from the 'route' field." },
     { keys: ["camera", "cam", "offline"], answer: "If the camera badge shows CAM OFFLINE, the backend hasn't received a frame from the ESP32-CAM recently. Check that the ESP32-CAM is powered, on the same network, and POSTing to /camera/upload." },
     { keys: ["total", "today", "stat"], answer: "Today's totals (Items Sorted, Recyclable %, Avg. Confidence) are shown on the Dashboard's stats row, calculated from scans received this session and reset at local midnight." },
     { keys: ["sign in", "login", "token"], answer: "Sign in uses the shared account credentials configured on the backend. Once signed in, a token is stored in this browser and used for the WebSocket and camera stream." },

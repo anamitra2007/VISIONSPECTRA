@@ -1,8 +1,10 @@
 """
 SpectraLink Backend
 --------------------
-Receives NIR sensor data from the ESP32 station, classifies the material,
-looks up recyclability, decides a sort route, broadcasts the result to the
+Receives NIR sensor data from the ESP32 station, classifies the material
+by fusing that spectrum with the latest ESP32-CAM frame (same /nir-scan
+contract — the image is never sent on a new endpoint), looks up
+recyclability, decides a sort route, broadcasts the result to the
 dashboard over WebSocket, and returns the route so the ESP32 can drive the
 servo.
 
@@ -21,7 +23,9 @@ fine for a single shared account.
 """
 
 import asyncio
+import io
 import logging
+import math
 import os
 import secrets
 import time
@@ -35,6 +39,14 @@ try:
     import joblib
 except ImportError:  # allows the server to boot even before joblib is installed
     joblib = None
+try:
+    import numpy as np
+except ImportError:
+    np = None
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("spectralink")
@@ -115,6 +127,15 @@ MATERIAL_INFO = {
     "OTHER": {"recyclable": False, "reason": "Mixed/multi-polymer composition, can't be separated for reprocessing."},
 }
 
+MATERIAL_CLASSES = ("PET", "HDPE", "PP", "LDPE", "PVC", "PS", "OTHER")
+
+# How long without a new uploaded frame before we treat the camera as
+# disconnected (dashboard status) and skip image fusion on /nir-scan.
+CAMERA_STALE_SECONDS = 6
+_latest_frame: bytes | None = None
+_last_frame_time: float | None = None
+_frame_event = asyncio.Event()
+
 # ---------------------------------------------------------------------------
 # WebSocket connection management (for the live dashboard)
 # ---------------------------------------------------------------------------
@@ -155,11 +176,153 @@ async def broadcast_result(result: dict):
         connected_clients.remove(client)
 
 
+def _softmax(logits: dict[str, float]) -> dict[str, float]:
+    peak = max(logits.values())
+    exps = {key: math.exp(value - peak) for key, value in logits.items()}
+    total = sum(exps.values()) or 1.0
+    return {key: value / total for key, value in exps.items()}
+
+
+def classify_camera_frame(jpeg_bytes: bytes) -> dict | None:
+    """Visual polymer prior from the latest JPEG. Complements NIR: black
+    plastics, empty belt, and color/texture cues that a 13-channel AS7343
+    cannot see. Not a substitute for a trained CNN — it is a safety prior
+    fused with the NIR classifier."""
+    if Image is None or np is None:
+        return None
+    try:
+        image = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+        image = image.resize((96, 96), Image.BILINEAR)
+        rgb = np.asarray(image, dtype=np.float32) / 255.0
+    except Exception as exc:
+        logger.warning(f"Could not decode camera frame for fusion: {exc}")
+        return None
+
+    red, green, blue = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    saturation = np.max(rgb, axis=2) - np.min(rgb, axis=2)
+    dark_frac = float((luminance < 0.18).mean())
+    bright_frac = float((luminance > 0.72).mean())
+    low_sat_frac = float((saturation < 0.10).mean())
+    mid_sat_frac = float(((saturation >= 0.10) & (saturation < 0.35)).mean())
+    texture = float(
+        np.mean(np.abs(np.diff(luminance, axis=0)))
+        + np.mean(np.abs(np.diff(luminance, axis=1)))
+    )
+    mean_r, mean_g, mean_b = float(red.mean()), float(green.mean()), float(blue.mean())
+    empty = float(luminance.var()) < 0.004 and texture < 0.02
+
+    logits = {name: 0.0 for name in MATERIAL_CLASSES}
+    if empty:
+        logits["OTHER"] = 3.0
+    elif dark_frac > 0.42:
+        # Carbon-black objects absorb NIR; prefer a conservative visual call.
+        logits["OTHER"] = 2.8
+        logits["PVC"] = 0.5
+        logits["PS"] = 0.4
+    else:
+        if bright_frac > 0.22 and low_sat_frac > 0.35:
+            logits["PET"] += 2.2
+            logits["PS"] += 0.7
+        if float(luminance.mean()) > 0.45 and low_sat_frac > 0.3 and mean_b >= mean_r:
+            logits["HDPE"] += 1.8
+        if mean_r > mean_b + 0.05 and mid_sat_frac > 0.2:
+            logits["PP"] += 1.6
+        if texture > 0.045 and 0.25 < float(luminance.mean()) < 0.7:
+            logits["LDPE"] += 1.5
+        if mean_g > mean_r and mean_g > mean_b:
+            logits["PVC"] += 0.9
+        if bright_frac > 0.3 and texture > 0.04:
+            logits["PS"] += 1.2
+        logits["OTHER"] += 0.3
+
+    probs = _softmax(logits)
+    material = max(probs, key=probs.get)
+    return {
+        "material": material,
+        "confidence": float(probs[material]),
+        "probs": probs,
+        "dark_frac": dark_frac,
+        "empty": empty,
+    }
+
+
+def latest_live_frame() -> bytes | None:
+    """Return the in-memory JPEG only if the camera is still posting frames."""
+    if _latest_frame is None or _last_frame_time is None:
+        return None
+    if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
+        return None
+    return _latest_frame
+
+
+def fuse_nir_and_image(nir_classes, nir_proba) -> tuple[str, float, str, dict | None]:
+    """Combine NIR class probabilities with the current camera frame.
+
+    NIR stays dominant when the image is missing, empty, or low-contrast.
+    Vision gets more weight on very dark objects (typical NIR failure).
+    Conflicting recyclable vs reject calls are resolved conservatively.
+    """
+    nir_probs = {name: 0.0 for name in MATERIAL_CLASSES}
+    for cls, probability in zip(nir_classes, nir_proba):
+        key = str(cls)
+        if key in nir_probs:
+            nir_probs[key] = float(probability)
+    total = sum(nir_probs.values())
+    if total > 0:
+        nir_probs = {key: value / total for key, value in nir_probs.items()}
+
+    nir_material = max(nir_probs, key=nir_probs.get)
+    frame = latest_live_frame()
+    image_result = classify_camera_frame(frame) if frame else None
+
+    if image_result is None:
+        return nir_material, float(nir_probs[nir_material]), "nir", None
+
+    img_probs = {name: float(image_result["probs"].get(name, 0.0)) for name in MATERIAL_CLASSES}
+    nir_weight = 0.72
+    if image_result["empty"]:
+        nir_weight = 0.9
+    elif image_result["dark_frac"] > 0.42:
+        nir_weight = 0.28
+    elif image_result["material"] == nir_material:
+        nir_weight = 0.62
+
+    fused = {
+        name: nir_weight * nir_probs[name] + (1.0 - nir_weight) * img_probs[name]
+        for name in MATERIAL_CLASSES
+    }
+    fused_total = sum(fused.values()) or 1.0
+    fused = {name: value / fused_total for name, value in fused.items()}
+    material = max(fused, key=fused.get)
+    confidence = float(fused[material])
+
+    nir_recyclable = MATERIAL_INFO.get(nir_material, {}).get("recyclable", False)
+    img_recyclable = MATERIAL_INFO.get(image_result["material"], {}).get("recyclable", False)
+    if (
+        nir_material != image_result["material"]
+        and nir_probs[nir_material] >= 0.45
+        and image_result["confidence"] >= 0.35
+        and nir_recyclable != img_recyclable
+    ):
+        if not nir_recyclable:
+            material = nir_material
+            confidence = min(confidence, nir_probs[nir_material])
+        else:
+            material = image_result["material"]
+            confidence = min(confidence, image_result["confidence"])
+        confidence *= 0.85
+
+    if image_result["dark_frac"] > 0.5 and MATERIAL_INFO.get(material, {}).get("recyclable"):
+        material = "OTHER"
+        confidence = max(float(fused["OTHER"]), 0.55)
+
+    return material, float(confidence), "nir+image", image_result
+
+
 # ---------------------------------------------------------------------------
-# NIR-based scan endpoint — the intended primary classification path once
-# real AS7343 sensor data + a trained classifier exist. Currently a stub:
-# it returns a clear "not ready yet" error rather than pretending to work,
-# so it fails loudly instead of silently returning nonsense.
+# NIR + image scan — same /nir-scan contract as before. The ESP32 still
+# POSTs only spectral channels; the latest camera JPEG is fused server-side.
 # ---------------------------------------------------------------------------
 
 # Feature order the model was trained on (see train_nir_classifier.py /
@@ -209,7 +372,8 @@ async def nir_scan(payload: dict):
     if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
         return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
 
-    import numpy as np  # local import: only needed once nir_model exists
+    if np is None:
+        return {"error": "numpy is required for NIR classification."}
 
     try:
         X = np.asarray(readings, dtype=float).reshape(1, -1)
@@ -222,19 +386,37 @@ async def nir_scan(payload: dict):
     # exactly what the ESP32 most recently sent.
     latest_nir_reading = [int(value) if value.is_integer() else float(value) for value in X.flatten()]
 
-    predicted_class = nir_model.predict(X)[0]
-    confidence = float(max(nir_model.predict_proba(X)[0]))
+    nir_proba = nir_model.predict_proba(X)[0]
+    predicted_class, confidence, fusion_source, image_result = fuse_nir_and_image(
+        nir_model.classes_, nir_proba
+    )
+    predicted_class = str(predicted_class)
 
     info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
     route = "LEFT" if info["recyclable"] else "RIGHT"
+
+    reason = info["reason"]
+    nir_guess = str(nir_model.classes_[int(nir_proba.argmax())])
+    nir_conf_pct = round(float(max(nir_proba)) * 100, 1)
+    if image_result is None:
+        reason = f"{reason} Camera unavailable or stale — NIR-only decision ({nir_guess} {nir_conf_pct}%)."
+    else:
+        img_conf_pct = round(image_result["confidence"] * 100, 1)
+        reason = (
+            f"{reason} Fused NIR ({nir_guess} {nir_conf_pct}%) with camera "
+            f"({image_result['material']} {img_conf_pct}%)."
+        )
 
     result = {
         "material": predicted_class,
         "confidence": round(confidence * 100, 1),
         "recyclable": info["recyclable"],
-        "reason": info["reason"],
+        "reason": reason,
         "route": route,
         "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
+        "source": fusion_source,
+        "nir_material": nir_guess,
+        "image_material": None if image_result is None else image_result["material"],
     }
 
     logger.info(f"NIR scan result: {result}")
@@ -258,18 +440,6 @@ async def nir_scan(payload: dict):
 # the same value as the "X-Api-Key" header from the ESP32-CAM firmware.
 # Leave it unset only for local testing.
 CAMERA_API_KEY = os.environ.get("CAMERA_API_KEY", "")
-
-_latest_frame: bytes | None = None
-_last_frame_time: float | None = None
-_frame_event = asyncio.Event()
-
-# How long without a new uploaded frame before we consider the camera
-# "disconnected." GET /camera/status reports this to the dashboard, which
-# polls it to decide whether to show the live feed or fall back to the
-# default conveyor animation — since an MJPEG <img> stream itself never
-# signals staleness (the HTTP connection to the browser stays open even
-# when the ESP32-CAM has gone quiet).
-CAMERA_STALE_SECONDS = 6
 
 
 @app.post("/camera/upload")
@@ -361,10 +531,11 @@ async def camera_latest(token: str | None = None):
 async def root():
     return {
         "status": "SpectraLink backend running",
-        # `model_loaded` remains for the dashboard's existing status display;
-        # the active classifier is now the NIR model, not an image model.
+        # `model_loaded` remains for the dashboard's existing status display.
+        # Sorting fuses the NIR model with the latest camera frame when live.
         "model_loaded": nir_model is not None,
         "nir_model_loaded": nir_model is not None,
+        "image_fusion_ready": Image is not None and np is not None,
         "nir_expected_channels": NIR_EXPECTED_CHANNELS,
         "latest_nir_reading": latest_nir_reading,
         "connected_dashboards": len(connected_clients),
