@@ -121,6 +121,8 @@ tailwind.config = {
   // the Settings page can point this at a different backend at runtime.
   let BACKEND_WS_URL = "wss://ravishing-grace-production.up.railway.app/ws";
   const RECONNECT_DELAY_MS = 3000;
+  // Let the dashboard settle briefly before asking a new visitor to sign in.
+  const LOGIN_PROMPT_DELAY_MS = 2500;
 
   // localStorage key used to persist the login token across page
   // refreshes/tabs. Single shared account, so no per-user namespacing.
@@ -170,6 +172,8 @@ tailwind.config = {
     startCameraStream();
     if (els.signInOpenBtn) {
       els.signInOpenBtn.textContent = "Signed In";
+      els.signInOpenBtn.disabled = true;
+      els.signInOpenBtn.setAttribute("aria-label", "Signed in");
     }
     if (els.signOutBtn) {
       els.signOutBtn.classList.remove("hidden");
@@ -190,6 +194,8 @@ tailwind.config = {
     setConnectionStatus(false);
     if (els.signInOpenBtn) {
       els.signInOpenBtn.textContent = "Sign in";
+      els.signInOpenBtn.disabled = false;
+      els.signInOpenBtn.setAttribute("aria-label", "Sign in");
     }
     if (els.signOutBtn) {
       els.signOutBtn.classList.add("hidden");
@@ -1631,7 +1637,11 @@ function wireSupportChat() {
 
   function wireSignInModal() {
     if (els.signInOpenBtn)
-      els.signInOpenBtn.addEventListener("click", openSignInModal);
+      els.signInOpenBtn.addEventListener("click", () => {
+        // A signed-in user should remain on the dashboard when this header
+        // button is clicked. The separate Sign out button ends the session.
+        if (!getAuthToken()) openSignInModal();
+      });
     if (els.signInCloseBtn)
       els.signInCloseBtn.addEventListener("click", closeSignInModal);
     if (els.signOutBtn) els.signOutBtn.addEventListener("click", lockDashboard);
@@ -1785,7 +1795,7 @@ function wireSupportChat() {
       unlockDashboard();
     } else {
       setConnectionStatus(false);
-      openSignInModal();
+      window.setTimeout(openSignInModal, LOGIN_PROMPT_DELAY_MS);
     }
 
     if (els.exportDataBtn) {
