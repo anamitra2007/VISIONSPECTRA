@@ -169,89 +169,7 @@ async def broadcast_result(result: dict):
 
 
 # ---------------------------------------------------------------------------
-# Fusion logic (placeholder — refine once real NIR calibration data exists)
-# ---------------------------------------------------------------------------
-
-def fuse_prediction(yolo_class: str, yolo_confidence: float, nir_reading: list):
-    """
-    Combine YOLO's vision-based guess with the NIR spectral reading.
-
-    For now this is a pass-through: it trusts YOLO's prediction as-is.
-    Once you have real sensor data, replace this with logic that compares
-    `nir_reading` against known reference spectral signatures per material
-    (e.g. nearest-neighbor match) and uses that to confirm or override
-    the vision-only guess — especially useful for the PS/PP confusion.
-    """
-    if not nir_reading:
-        return yolo_class, yolo_confidence
-
-    # TODO: real fusion logic goes here once NIR calibration data is collected.
-    return yolo_class, yolo_confidence
-
-
-# ---------------------------------------------------------------------------
-# Core scan endpoint — this is what the ESP32 calls (image-based path)
-# ---------------------------------------------------------------------------
-
-@app.post("/scan")
-async def scan_item(payload: dict):
-    """
-    Expected payload:
-    {
-        "image": "<base64 encoded JPEG>",
-        "nir_reading": [0.42, 0.38, 0.91, ...],   # optional
-        "timestamp": "2026-07-19T15:22:05"        # optional
-    }
-    """
-    if model is None:
-        return {"error": "Model not loaded. Place best.pt next to main.py and restart the server."}
-
-    if "image" not in payload:
-        return {"error": "Missing 'image' field in payload."}
-
-    # Decode the incoming image
-    try:
-        image_bytes = base64.b64decode(payload["image"])
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    except Exception as e:
-        return {"error": f"Could not decode image: {e}"}
-
-    # Run YOLO classification (offloaded to a thread so this blocking,
-    # CPU-bound call doesn't freeze /camera/stream or /camera/upload while
-    # it runs — same reasoning as auto_scan_loop's _classify_frame_sync).
-    results = await asyncio.to_thread(model, image, verbose=False)
-    predicted_class = results[0].names[results[0].probs.top1]
-    confidence = float(results[0].probs.top1conf)
-
-    # Fuse with NIR sensor reading
-    nir_reading = payload.get("nir_reading", [])
-    final_material, final_confidence = fuse_prediction(predicted_class, confidence, nir_reading)
-
-    # Look up recyclability
-    info = MATERIAL_INFO.get(final_material, {"recyclable": False, "reason": "Unknown material."})
-    route = "LEFT" if info["recyclable"] else "RIGHT"
-
-    result = {
-        "material": final_material,
-        "confidence": round(final_confidence * 100, 1),
-        "recyclable": info["recyclable"],
-        "reason": info["reason"],
-        "route": route,
-        "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
-    }
-
-    logger.info(f"Scan result: {result}")
-    await broadcast_result(result)
-
-    # This is what the ESP32 uses to decide which way to move the servo
-    return {"route": route, "material": final_material, "confidence": result["confidence"]}
-
-
-# ---------------------------------------------------------------------------
-# NIR-based scan endpoint — the intended primary classification path once
-# real AS7343 sensor data + a trained classifier exist. Currently a stub:
-# it returns a clear "not ready yet" error rather than pretending to work,
-# so it fails loudly instead of silently returning nonsense.
+# NIR model and vision/NIR fusion
 # ---------------------------------------------------------------------------
 
 # Feature order the model was trained on (see train_nir_classifier.py /
@@ -272,60 +190,148 @@ if joblib is not None:
         logger.warning(f"Could not load {NIR_MODEL_PATH} yet: {e}")
 
 
-@app.post("/nir-scan")
-async def nir_scan(payload: dict):
-    """
-    Expected payload:
-    {
-        "nir_reading": [F1, F2, F3, F4, F5, F6, F7, F8, FZ, FY, FXL, NIR, Clear],  # 13 values, in this exact order
-        "timestamp": "2026-07-19T15:22:05"   # optional
+def validate_nir_reading(readings: object) -> list[float] | None:
+    """Returns 13 numeric sensor channels, or None when no usable reading was sent."""
+    if readings is None:
+        return None
+    if not isinstance(readings, list) or len(readings) != NIR_EXPECTED_CHANNELS:
+        raise HTTPException(status_code=422, detail=f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values.")
+    try:
+        return [float(value) for value in readings]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="NIR channel values must be numeric.")
+
+
+def predict_nir(readings: list[float] | None) -> dict[str, float] | None:
+    """Returns class probabilities only when both a reading and NIR model exist."""
+    if readings is None or nir_model is None:
+        return None
+
+    import numpy as np
+
+    probabilities = nir_model.predict_proba(np.array(readings).reshape(1, -1))[0]
+    return {
+        str(label): float(probability)
+        for label, probability in zip(nir_model.classes_, probabilities)
     }
-    """
-    if nir_model is None:
-        return {"error": "NIR classifier not trained/loaded yet. See nir_readings.csv workflow."}
 
-    readings = payload.get("nir_reading")
-    if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
-        return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
 
-    # All-zero reading means nothing is on the belt under the sensor yet —
-    # don't force this through the classifier (it would just pick whichever
-    # trained class happens to be numerically closest to all-zeros).
-    if all(v == 0 for v in readings):
-        result = {
-            "material": "NONE",
-            "confidence": 100.0,
-            "recyclable": None,
-            "reason": "No object detected on the conveyor belt.",
-            "route": "NONE",
-            "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
-        }
-        logger.info(f"NIR scan result: {result}")
-        await broadcast_result(result)
-        return {"route": "NONE", "material": "NONE", "confidence": 100.0}
+def predict_yolo_sync(image: Image.Image) -> dict[str, float]:
+    """Runs YOLO and exposes probabilities by material label for fusion."""
+    results = model(image, verbose=False)
+    result = results[0]
+    probabilities = result.probs.data.tolist()
+    return {
+        str(result.names[index]): float(probability)
+        for index, probability in enumerate(probabilities)
+    }
 
-    import numpy as np  # local import: only needed once nir_model exists
 
-    X = np.array(readings).reshape(1, -1)
-    predicted_class = nir_model.predict(X)[0]
-    confidence = float(max(nir_model.predict_proba(X)[0]))
+def combine_predictions(
+    yolo_scores: dict[str, float] | None,
+    nir_scores: dict[str, float] | None,
+) -> tuple[str, float, str]:
+    """Uses the available classifier, or averages both probability vectors."""
+    if yolo_scores is None and nir_scores is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No usable classifier is available: camera/YOLO and NIR are both unavailable.",
+        )
+    if yolo_scores is None:
+        material, confidence = max(nir_scores.items(), key=lambda item: item[1])
+        return material, confidence, "nir"
+    if nir_scores is None:
+        material, confidence = max(yolo_scores.items(), key=lambda item: item[1])
+        return material, confidence, "yolo"
 
-    info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
-    route = "LEFT" if info["recyclable"] else "RIGHT"
+    # Both sources are live. Equal weighting prevents either source from
+    # silently overriding the other and makes their agreement raise confidence.
+    labels = set(yolo_scores) | set(nir_scores)
+    combined_scores = {
+        label: (yolo_scores.get(label, 0.0) + nir_scores.get(label, 0.0)) / 2
+        for label in labels
+    }
+    material, confidence = max(combined_scores.items(), key=lambda item: item[1])
+    return material, confidence, "combined"
 
-    result = {
-        "material": predicted_class,
+
+async def predict_yolo(image: Image.Image | None) -> dict[str, float] | None:
+    if image is None or model is None:
+        return None
+    return await asyncio.to_thread(predict_yolo_sync, image)
+
+
+def build_scan_result(material: str, confidence: float, source: str, timestamp: str | None) -> dict:
+    info = MATERIAL_INFO.get(material, {"recyclable": False, "reason": "Unknown material."})
+    return {
+        "material": material,
         "confidence": round(confidence * 100, 1),
         "recyclable": info["recyclable"],
         "reason": info["reason"],
-        "route": route,
-        "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
+        "route": "LEFT" if info["recyclable"] else "RIGHT",
+        "source": source,
+        "timestamp": timestamp or datetime.utcnow().isoformat(),
     }
 
-    logger.info(f"NIR scan result: {result}")
-    await broadcast_result(result)
 
-    return {"route": route, "material": predicted_class, "confidence": result["confidence"]}
+async def publish_scan_result(
+    yolo_image: Image.Image | None, readings: list[float] | None, timestamp: str | None
+) -> dict:
+    yolo_scores, nir_scores = await predict_yolo(yolo_image), predict_nir(readings)
+    material, confidence, source = combine_predictions(yolo_scores, nir_scores)
+    result = build_scan_result(material, confidence, source, timestamp)
+    logger.info(f"Scan result: {result}")
+    await broadcast_result(result)
+    return result
+
+
+def decode_image(image_data: object) -> Image.Image | None:
+    if image_data is None:
+        return None
+    if not isinstance(image_data, str):
+        raise HTTPException(status_code=422, detail="The image field must be base64-encoded JPEG data.")
+    try:
+        return Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not decode image: {exc}")
+
+
+def latest_camera_image() -> Image.Image | None:
+    if _latest_frame is None or _last_frame_time is None:
+        return None
+    if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
+        return None
+    try:
+        return Image.open(io.BytesIO(_latest_frame)).convert("RGB")
+    except Exception as exc:
+        logger.warning(f"Could not decode latest camera frame: {exc}")
+        return None
+
+
+@app.post("/scan")
+async def scan_item(payload: dict):
+    """Classifies a supplied image, NIR reading, or both; both are fused."""
+    image = decode_image(payload.get("image"))
+    readings = validate_nir_reading(payload.get("nir_reading"))
+    result = await publish_scan_result(image, readings, payload.get("timestamp"))
+    return {key: result[key] for key in ("route", "material", "confidence", "source")}
+
+
+@app.post("/nir-scan")
+async def nir_scan(payload: dict):
+    """Classifies NIR readings and fuses a fresh camera frame when available."""
+    readings = validate_nir_reading(payload.get("nir_reading"))
+    if readings is not None and all(value == 0 for value in readings):
+        result = {
+            "material": "NONE", "confidence": 100.0, "recyclable": None,
+            "reason": "No object detected on the conveyor belt.", "route": "NONE",
+            "source": "nir", "timestamp": payload.get("timestamp") or datetime.utcnow().isoformat(),
+        }
+        await broadcast_result(result)
+        return {key: result[key] for key in ("route", "material", "confidence", "source")}
+
+    result = await publish_scan_result(latest_camera_image(), readings, payload.get("timestamp"))
+    return {key: result[key] for key in ("route", "material", "confidence", "source")}
 
 
 # ---------------------------------------------------------------------------
