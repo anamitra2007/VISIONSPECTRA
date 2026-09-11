@@ -288,6 +288,22 @@ async def nir_scan(payload: dict):
     if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
         return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
 
+    # All-zero reading means nothing is on the belt under the sensor yet —
+    # don't force this through the classifier (it would just pick whichever
+    # trained class happens to be numerically closest to all-zeros).
+    if all(v == 0 for v in readings):
+        result = {
+            "material": "NONE",
+            "confidence": 100.0,
+            "recyclable": None,
+            "reason": "No object detected on the conveyor belt.",
+            "route": "NONE",
+            "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
+        }
+        logger.info(f"NIR scan result: {result}")
+        await broadcast_result(result)
+        return {"route": "NONE", "material": "NONE", "confidence": 100.0}
+
     import numpy as np  # local import: only needed once nir_model exists
 
     X = np.array(readings).reshape(1, -1)

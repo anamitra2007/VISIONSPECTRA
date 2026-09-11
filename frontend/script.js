@@ -647,8 +647,37 @@ tailwind.config = {
   // Applies one real scan result (received over the WebSocket) to the UI.
   // `data` shape (sent by main.py's /nir-scan endpoint via
   // broadcast_result): { material, confidence, recyclable, reason, route, timestamp }
-  function applyBackendResult(data) {
+    function applyBackendResult(data) {
     const materialId = (data.material || "OTHER").toUpperCase();
+
+    // Empty belt — main.py's /nir-scan sends this when all 13 sensor
+    // channels read 0 (nothing under the sensor). Show an idle state and
+    // skip stats/history — this isn't a real sort event.
+    if (materialId === "NONE") {
+      if (els.bboxLabel) els.bboxLabel.textContent = "NO OBJECT DETECTED";
+      if (els.conveyorItem) els.conveyorItem.style.background = "transparent";
+      if (els.materialName) els.materialName.textContent = "No Object Detected";
+      if (els.materialConfidence) els.materialConfidence.textContent = "";
+      if (els.materialDesc)
+        els.materialDesc.textContent = "Waiting for an item on the belt…";
+      if (els.materialProperties) els.materialProperties.textContent = "";
+      if (els.materialBadge) {
+        els.materialBadge.textContent = "Idle";
+        els.materialBadge.className =
+          "bg-surface-container-highest text-on-surface-variant border border-outline-variant/40 px-3 py-1 rounded-full font-label-caps text-label-caps";
+      }
+      if (els.carbonOffset) els.carbonOffset.parentElement.style.display = "none";
+      if (els.routeText) els.routeText.textContent = "Route: \u2014";
+      if (els.routeArrowWrap) els.routeArrowWrap.style.borderColor = "#8c909f";
+      if (els.routeArrowIcon) {
+        els.routeArrowIcon.textContent = "remove";
+        els.routeArrowIcon.style.color = "#8c909f";
+      }
+      // No recordDailyScan, no historyLog entry — an empty-belt reading
+      // isn't a sort event and shouldn't count toward totals or the log.
+      return;
+    }
+
     const display = MATERIAL_DISPLAY[materialId] || MATERIAL_DISPLAY.OTHER;
     const confidence =
       typeof data.confidence === "number" ? data.confidence : 0;
