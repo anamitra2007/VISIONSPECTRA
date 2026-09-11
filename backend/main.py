@@ -1,12 +1,10 @@
 """
 SpectraLink Backend
 --------------------
-Receives NIR sensor data from the ESP32 station, classifies the material
-by fusing that spectrum with the latest ESP32-CAM frame (same /nir-scan
-contract — the image is never sent on a new endpoint), looks up
-recyclability, decides a sort route, broadcasts the result to the
-dashboard over WebSocket, and returns the route so the ESP32 can drive the
-servo.
+Receives image + NIR sensor data from the ESP32 station, runs YOLO
+classification, fuses it with the sensor reading, looks up recyclability,
+decides a sort route, broadcasts the result to the dashboard over
+WebSocket, and returns the route so the ESP32 can drive the servo.
 
 Also proxies a live MJPEG feed from an ESP32-CAM: the camera POSTs JPEG
 frames to /camera/upload, and the dashboard reads them back from
@@ -23,30 +21,28 @@ fine for a single shared account.
 """
 
 import asyncio
+import base64
 import io
 import logging
-import math
 import os
 import secrets
 import time
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from PIL import Image
+
+try:
+    from ultralytics import YOLO
+except ImportError:  # allows the server to boot even before ultralytics is installed
+    YOLO = None
+
 try:
     import joblib
 except ImportError:  # allows the server to boot even before joblib is installed
     joblib = None
-try:
-    import numpy as np
-except ImportError:
-    np = None
-try:
-    from PIL import Image
-except ImportError:
-    Image = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("spectralink")
@@ -64,9 +60,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Resolve artifacts from this file's directory rather than the process working
-# directory. Railway may start the service from the repository root.
-ARTIFACTS_DIR = Path(__file__).resolve().parent
+MODEL_PATH = "best.pt"
+model = None
+if YOLO is not None:
+    try:
+        model = YOLO(MODEL_PATH)
+        logger.info(f"Loaded model from {MODEL_PATH}")
+    except Exception as e:
+        logger.warning(f"Could not load {MODEL_PATH} yet: {e}")
 
 # ---------------------------------------------------------------------------
 # Authentication — single shared account, token-based
@@ -74,8 +75,8 @@ ARTIFACTS_DIR = Path(__file__).resolve().parent
 # Shared dashboard credentials. These are intentionally set directly so the
 # deployed service uses the same credentials even if Render has old
 # environment-variable values configured.
-SITE_USERNAME = os.environ.get("SITE_USERNAME", "anamitra")
-SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "12345") 
+SITE_USERNAME = "anamitra"
+SITE_PASSWORD = "12345"
 
 # In-memory token store. Fine for a single shared account with no need
 # for per-user tracking — tokens are just "is this person allowed in."
@@ -127,15 +128,6 @@ MATERIAL_INFO = {
     "OTHER": {"recyclable": False, "reason": "Mixed/multi-polymer composition, can't be separated for reprocessing."},
 }
 
-MATERIAL_CLASSES = ("PET", "HDPE", "PP", "LDPE", "PVC", "PS", "OTHER")
-
-# How long without a new uploaded frame before we treat the camera as
-# disconnected (dashboard status) and skip image fusion on /nir-scan.
-CAMERA_STALE_SECONDS = 6
-_latest_frame: bytes | None = None
-_last_frame_time: float | None = None
-_frame_event = asyncio.Event()
-
 # ---------------------------------------------------------------------------
 # WebSocket connection management (for the live dashboard)
 # ---------------------------------------------------------------------------
@@ -176,153 +168,90 @@ async def broadcast_result(result: dict):
         connected_clients.remove(client)
 
 
-def _softmax(logits: dict[str, float]) -> dict[str, float]:
-    peak = max(logits.values())
-    exps = {key: math.exp(value - peak) for key, value in logits.items()}
-    total = sum(exps.values()) or 1.0
-    return {key: value / total for key, value in exps.items()}
+# ---------------------------------------------------------------------------
+# Fusion logic (placeholder — refine once real NIR calibration data exists)
+# ---------------------------------------------------------------------------
 
-
-def classify_camera_frame(jpeg_bytes: bytes) -> dict | None:
-    """Visual polymer prior from the latest JPEG. Complements NIR: black
-    plastics, empty belt, and color/texture cues that a 13-channel AS7343
-    cannot see. Not a substitute for a trained CNN — it is a safety prior
-    fused with the NIR classifier."""
-    if Image is None or np is None:
-        return None
-    try:
-        image = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
-        image = image.resize((96, 96), Image.BILINEAR)
-        rgb = np.asarray(image, dtype=np.float32) / 255.0
-    except Exception as exc:
-        logger.warning(f"Could not decode camera frame for fusion: {exc}")
-        return None
-
-    red, green, blue = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-    saturation = np.max(rgb, axis=2) - np.min(rgb, axis=2)
-    dark_frac = float((luminance < 0.18).mean())
-    bright_frac = float((luminance > 0.72).mean())
-    low_sat_frac = float((saturation < 0.10).mean())
-    mid_sat_frac = float(((saturation >= 0.10) & (saturation < 0.35)).mean())
-    texture = float(
-        np.mean(np.abs(np.diff(luminance, axis=0)))
-        + np.mean(np.abs(np.diff(luminance, axis=1)))
-    )
-    mean_r, mean_g, mean_b = float(red.mean()), float(green.mean()), float(blue.mean())
-    empty = float(luminance.var()) < 0.004 and texture < 0.02
-
-    logits = {name: 0.0 for name in MATERIAL_CLASSES}
-    if empty:
-        logits["OTHER"] = 3.0
-    elif dark_frac > 0.42:
-        # Carbon-black objects absorb NIR; prefer a conservative visual call.
-        logits["OTHER"] = 2.8
-        logits["PVC"] = 0.5
-        logits["PS"] = 0.4
-    else:
-        if bright_frac > 0.22 and low_sat_frac > 0.35:
-            logits["PET"] += 2.2
-            logits["PS"] += 0.7
-        if float(luminance.mean()) > 0.45 and low_sat_frac > 0.3 and mean_b >= mean_r:
-            logits["HDPE"] += 1.8
-        if mean_r > mean_b + 0.05 and mid_sat_frac > 0.2:
-            logits["PP"] += 1.6
-        if texture > 0.045 and 0.25 < float(luminance.mean()) < 0.7:
-            logits["LDPE"] += 1.5
-        if mean_g > mean_r and mean_g > mean_b:
-            logits["PVC"] += 0.9
-        if bright_frac > 0.3 and texture > 0.04:
-            logits["PS"] += 1.2
-        logits["OTHER"] += 0.3
-
-    probs = _softmax(logits)
-    material = max(probs, key=probs.get)
-    return {
-        "material": material,
-        "confidence": float(probs[material]),
-        "probs": probs,
-        "dark_frac": dark_frac,
-        "empty": empty,
-    }
-
-
-def latest_live_frame() -> bytes | None:
-    """Return the in-memory JPEG only if the camera is still posting frames."""
-    if _latest_frame is None or _last_frame_time is None:
-        return None
-    if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
-        return None
-    return _latest_frame
-
-
-def fuse_nir_and_image(nir_classes, nir_proba) -> tuple[str, float, str, dict | None]:
-    """Combine NIR class probabilities with the current camera frame.
-
-    NIR stays dominant when the image is missing, empty, or low-contrast.
-    Vision gets more weight on very dark objects (typical NIR failure).
-    Conflicting recyclable vs reject calls are resolved conservatively.
+def fuse_prediction(yolo_class: str, yolo_confidence: float, nir_reading: list):
     """
-    nir_probs = {name: 0.0 for name in MATERIAL_CLASSES}
-    for cls, probability in zip(nir_classes, nir_proba):
-        key = str(cls)
-        if key in nir_probs:
-            nir_probs[key] = float(probability)
-    total = sum(nir_probs.values())
-    if total > 0:
-        nir_probs = {key: value / total for key, value in nir_probs.items()}
+    Combine YOLO's vision-based guess with the NIR spectral reading.
 
-    nir_material = max(nir_probs, key=nir_probs.get)
-    frame = latest_live_frame()
-    image_result = classify_camera_frame(frame) if frame else None
+    For now this is a pass-through: it trusts YOLO's prediction as-is.
+    Once you have real sensor data, replace this with logic that compares
+    `nir_reading` against known reference spectral signatures per material
+    (e.g. nearest-neighbor match) and uses that to confirm or override
+    the vision-only guess — especially useful for the PS/PP confusion.
+    """
+    if not nir_reading:
+        return yolo_class, yolo_confidence
 
-    if image_result is None:
-        return nir_material, float(nir_probs[nir_material]), "nir", None
-
-    img_probs = {name: float(image_result["probs"].get(name, 0.0)) for name in MATERIAL_CLASSES}
-    nir_weight = 0.72
-    if image_result["empty"]:
-        nir_weight = 0.9
-    elif image_result["dark_frac"] > 0.42:
-        nir_weight = 0.28
-    elif image_result["material"] == nir_material:
-        nir_weight = 0.62
-
-    fused = {
-        name: nir_weight * nir_probs[name] + (1.0 - nir_weight) * img_probs[name]
-        for name in MATERIAL_CLASSES
-    }
-    fused_total = sum(fused.values()) or 1.0
-    fused = {name: value / fused_total for name, value in fused.items()}
-    material = max(fused, key=fused.get)
-    confidence = float(fused[material])
-
-    nir_recyclable = MATERIAL_INFO.get(nir_material, {}).get("recyclable", False)
-    img_recyclable = MATERIAL_INFO.get(image_result["material"], {}).get("recyclable", False)
-    if (
-        nir_material != image_result["material"]
-        and nir_probs[nir_material] >= 0.45
-        and image_result["confidence"] >= 0.35
-        and nir_recyclable != img_recyclable
-    ):
-        if not nir_recyclable:
-            material = nir_material
-            confidence = min(confidence, nir_probs[nir_material])
-        else:
-            material = image_result["material"]
-            confidence = min(confidence, image_result["confidence"])
-        confidence *= 0.85
-
-    if image_result["dark_frac"] > 0.5 and MATERIAL_INFO.get(material, {}).get("recyclable"):
-        material = "OTHER"
-        confidence = max(float(fused["OTHER"]), 0.55)
-
-    return material, float(confidence), "nir+image", image_result
+    # TODO: real fusion logic goes here once NIR calibration data is collected.
+    return yolo_class, yolo_confidence
 
 
 # ---------------------------------------------------------------------------
-# NIR + image scan — same /nir-scan contract as before. The ESP32 still
-# POSTs only spectral channels; the latest camera JPEG is fused server-side.
+# Core scan endpoint — this is what the ESP32 calls (image-based path)
+# ---------------------------------------------------------------------------
+
+@app.post("/scan")
+async def scan_item(payload: dict):
+    """
+    Expected payload:
+    {
+        "image": "<base64 encoded JPEG>",
+        "nir_reading": [0.42, 0.38, 0.91, ...],   # optional
+        "timestamp": "2026-07-19T15:22:05"        # optional
+    }
+    """
+    if model is None:
+        return {"error": "Model not loaded. Place best.pt next to main.py and restart the server."}
+
+    if "image" not in payload:
+        return {"error": "Missing 'image' field in payload."}
+
+    # Decode the incoming image
+    try:
+        image_bytes = base64.b64decode(payload["image"])
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as e:
+        return {"error": f"Could not decode image: {e}"}
+
+    # Run YOLO classification (offloaded to a thread so this blocking,
+    # CPU-bound call doesn't freeze /camera/stream or /camera/upload while
+    # it runs — same reasoning as auto_scan_loop's _classify_frame_sync).
+    results = await asyncio.to_thread(model, image, verbose=False)
+    predicted_class = results[0].names[results[0].probs.top1]
+    confidence = float(results[0].probs.top1conf)
+
+    # Fuse with NIR sensor reading
+    nir_reading = payload.get("nir_reading", [])
+    final_material, final_confidence = fuse_prediction(predicted_class, confidence, nir_reading)
+
+    # Look up recyclability
+    info = MATERIAL_INFO.get(final_material, {"recyclable": False, "reason": "Unknown material."})
+    route = "LEFT" if info["recyclable"] else "RIGHT"
+
+    result = {
+        "material": final_material,
+        "confidence": round(final_confidence * 100, 1),
+        "recyclable": info["recyclable"],
+        "reason": info["reason"],
+        "route": route,
+        "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
+    }
+
+    logger.info(f"Scan result: {result}")
+    await broadcast_result(result)
+
+    # This is what the ESP32 uses to decide which way to move the servo
+    return {"route": route, "material": final_material, "confidence": result["confidence"]}
+
+
+# ---------------------------------------------------------------------------
+# NIR-based scan endpoint — the intended primary classification path once
+# real AS7343 sensor data + a trained classifier exist. Currently a stub:
+# it returns a clear "not ready yet" error rather than pretending to work,
+# so it fails loudly instead of silently returning nonsense.
 # ---------------------------------------------------------------------------
 
 # Feature order the model was trained on (see train_nir_classifier.py /
@@ -333,9 +262,8 @@ NIR_FEATURE_ORDER = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
                       "FZ", "FY", "FXL", "NIR", "Clear"]
 NIR_EXPECTED_CHANNELS = len(NIR_FEATURE_ORDER)  # 13 — AS7343 8 spectral + FZ/FY/FXL + NIR + Clear
 
-NIR_MODEL_PATH = ARTIFACTS_DIR / "nir_classifier.pkl"
+NIR_MODEL_PATH = "nir_classifier.pkl"
 nir_model = None
-latest_nir_reading: list[float] | None = None
 if joblib is not None:
     try:
         nir_model = joblib.load(NIR_MODEL_PATH)
@@ -346,83 +274,172 @@ if joblib is not None:
 
 @app.post("/nir-scan")
 async def nir_scan(payload: dict):
-    global latest_nir_reading
-
     """
     Expected payload:
     {
         "nir_reading": [F1, F2, F3, F4, F5, F6, F7, F8, FZ, FY, FXL, NIR, Clear],  # 13 values, in this exact order
         "timestamp": "2026-07-19T15:22:05"   # optional
     }
-
-    The ESP32 may alternatively send the 13 readings as named fields, using
-    the same names as the training CSV (F1 through Clear). A CSV `Label`
-    field, if present, is ignored because the sensor does not know the class.
     """
     if nir_model is None:
         return {"error": "NIR classifier not trained/loaded yet. See nir_readings.csv workflow."}
 
     readings = payload.get("nir_reading")
-    if readings is None:
-        try:
-            readings = [payload[channel] for channel in NIR_FEATURE_ORDER]
-        except KeyError as e:
-            return {"error": f"Missing NIR channel: {e.args[0]}. Send all {NIR_EXPECTED_CHANNELS} channels."}
-
     if not readings or len(readings) != NIR_EXPECTED_CHANNELS:
         return {"error": f"Expected {NIR_EXPECTED_CHANNELS} NIR channel values."}
 
-    if np is None:
-        return {"error": "numpy is required for NIR classification."}
+    import numpy as np  # local import: only needed once nir_model exists
 
-    try:
-        X = np.asarray(readings, dtype=float).reshape(1, -1)
-    except (TypeError, ValueError):
-        return {"error": "All NIR channel values must be numeric."}
-    if not np.isfinite(X).all():
-        return {"error": "NIR channel values must be finite numbers."}
-
-    # Retain the latest sensor sample so the backend status page can show
-    # exactly what the ESP32 most recently sent.
-    latest_nir_reading = [int(value) if value.is_integer() else float(value) for value in X.flatten()]
-
-    nir_proba = nir_model.predict_proba(X)[0]
-    predicted_class, confidence, fusion_source, image_result = fuse_nir_and_image(
-        nir_model.classes_, nir_proba
-    )
-    predicted_class = str(predicted_class)
+    X = np.array(readings).reshape(1, -1)
+    predicted_class = nir_model.predict(X)[0]
+    confidence = float(max(nir_model.predict_proba(X)[0]))
 
     info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
     route = "LEFT" if info["recyclable"] else "RIGHT"
-
-    reason = info["reason"]
-    nir_guess = str(nir_model.classes_[int(nir_proba.argmax())])
-    nir_conf_pct = round(float(max(nir_proba)) * 100, 1)
-    if image_result is None:
-        reason = f"{reason} Camera unavailable or stale — NIR-only decision ({nir_guess} {nir_conf_pct}%)."
-    else:
-        img_conf_pct = round(image_result["confidence"] * 100, 1)
-        reason = (
-            f"{reason} Fused NIR ({nir_guess} {nir_conf_pct}%) with camera "
-            f"({image_result['material']} {img_conf_pct}%)."
-        )
 
     result = {
         "material": predicted_class,
         "confidence": round(confidence * 100, 1),
         "recyclable": info["recyclable"],
-        "reason": reason,
+        "reason": info["reason"],
         "route": route,
         "timestamp": payload.get("timestamp", datetime.utcnow().isoformat()),
-        "source": fusion_source,
-        "nir_material": nir_guess,
-        "image_material": None if image_result is None else image_result["material"],
     }
 
     logger.info(f"NIR scan result: {result}")
     await broadcast_result(result)
 
     return {"route": route, "material": predicted_class, "confidence": result["confidence"]}
+
+
+# ---------------------------------------------------------------------------
+# Auto-scan loop — classifies the live camera feed without waiting for the
+# ESP32 to explicitly call /scan. Runs on a timer in the background: every
+# AUTO_SCAN_INTERVAL_SECONDS it grabs whatever frame the camera most
+# recently uploaded and runs it through YOLO, same as /scan does manually.
+#
+# This exists as a demo/fallback path. Once the NIR classifier is the real
+# source of truth, this can be left running purely for display purposes
+# (showing what the camera "also thinks") or disabled entirely via
+# AUTO_SCAN_ENABLED = False.
+# ---------------------------------------------------------------------------
+AUTO_SCAN_ENABLED = True
+AUTO_SCAN_INTERVAL_SECONDS = 2.0
+
+# Below this confidence, treat it as "nothing recognizable in frame" (e.g.
+# empty conveyor belt) rather than broadcasting a low-quality guess.
+AUTO_SCAN_CONFIDENCE_THRESHOLD = 0.60
+
+# Once an item is broadcast, don't broadcast it again on every single tick
+# while it just sits there — only re-broadcast if the detected material
+# changes, or after this many seconds have passed (a "heartbeat" so the
+# dashboard doesn't look stuck if the same item is still there).
+AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS = 8.0
+
+_auto_scan_last_material: str | None = None
+_auto_scan_last_broadcast_time: float = 0.0
+_auto_scan_last_processed_frame_time: float | None = None
+
+# Approximates where the dashboard's on-screen bounding-box reticle sits,
+# so auto-scan classifies roughly "what's inside the box" instead of the
+# entire frame (background, hands, conveyor edges, etc). This is only an
+# approximation — the reticle is CSS-positioned against a responsive video
+# panel with no pixel-exact link to the camera's actual resolution — so
+# it's expressed as a fraction of the frame, not fixed pixels.
+#
+# Box on screen is w-96 h-80 (384x320px, ~1.2:1 ratio). CROP_WIDTH_FRAC /
+# CROP_HEIGHT_FRAC control how much of the frame (centered) counts as
+# "inside the box." If you resize the box in index.html, update these to
+# match its new ratio.
+AUTO_SCAN_CROP_WIDTH_FRAC = 0.55   # fraction of frame width kept, centered
+AUTO_SCAN_CROP_HEIGHT_FRAC = 0.65  # fraction of frame height kept, centered
+
+
+def crop_to_bbox_region(image: Image.Image) -> Image.Image:
+    """Crops the center of `image` down to the region approximating where
+    the dashboard's bounding-box overlay sits, using AUTO_SCAN_CROP_WIDTH_FRAC
+    / AUTO_SCAN_CROP_HEIGHT_FRAC."""
+    w, h = image.size
+    crop_w = int(w * AUTO_SCAN_CROP_WIDTH_FRAC)
+    crop_h = int(h * AUTO_SCAN_CROP_HEIGHT_FRAC)
+    left = (w - crop_w) // 2
+    top = (h - crop_h) // 2
+    return image.crop((left, top, left + crop_w, top + crop_h))
+
+
+def _classify_frame_sync(frame_bytes: bytes):
+    """Runs the actual decode + crop + YOLO inference. Synchronous and
+    CPU-bound on purpose — this is meant to be called via
+    asyncio.to_thread(), never awaited directly, so it doesn't block the
+    event loop (which also needs to keep serving /camera/stream and
+    accepting /camera/upload while this runs)."""
+    image = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
+    image = crop_to_bbox_region(image)
+    results = model(image, verbose=False)
+    predicted_class = results[0].names[results[0].probs.top1]
+    confidence = float(results[0].probs.top1conf)
+    return predicted_class, confidence
+
+
+async def auto_scan_loop():
+    global _auto_scan_last_material, _auto_scan_last_broadcast_time, _auto_scan_last_processed_frame_time
+
+    while True:
+        await asyncio.sleep(AUTO_SCAN_INTERVAL_SECONDS)
+
+        if not AUTO_SCAN_ENABLED or model is None:
+            continue
+        if _latest_frame is None or _last_frame_time is None:
+            continue
+
+        # Skip if the camera feed has gone stale (ESP32-CAM disconnected) —
+        # no point re-classifying the same frozen frame over and over.
+        if time.time() - _last_frame_time > CAMERA_STALE_SECONDS:
+            continue
+
+        # Skip if we've already classified this exact frame (camera hasn't
+        # uploaded anything new since our last pass).
+        if _auto_scan_last_processed_frame_time == _last_frame_time:
+            continue
+        _auto_scan_last_processed_frame_time = _last_frame_time
+
+        try:
+            predicted_class, confidence = await asyncio.to_thread(_classify_frame_sync, _latest_frame)
+        except Exception as e:
+            logger.warning(f"Auto-scan: classification failed: {e}")
+            continue
+
+        if confidence < AUTO_SCAN_CONFIDENCE_THRESHOLD:
+            continue
+
+        now = time.time()
+        material_changed = predicted_class != _auto_scan_last_material
+        cooldown_elapsed = (now - _auto_scan_last_broadcast_time) >= AUTO_SCAN_REBROADCAST_COOLDOWN_SECONDS
+        if not material_changed and not cooldown_elapsed:
+            continue
+
+        info = MATERIAL_INFO.get(predicted_class, {"recyclable": False, "reason": "Unknown material."})
+        route = "LEFT" if info["recyclable"] else "RIGHT"
+
+        result = {
+            "material": predicted_class,
+            "confidence": round(confidence * 100, 1),
+            "recyclable": info["recyclable"],
+            "reason": info["reason"],
+            "route": route,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        logger.info(f"Auto-scan result: {result}")
+        await broadcast_result(result)
+
+        _auto_scan_last_material = predicted_class
+        _auto_scan_last_broadcast_time = now
+
+
+@app.on_event("startup")
+async def start_auto_scan_loop():
+    asyncio.create_task(auto_scan_loop())
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +457,18 @@ async def nir_scan(payload: dict):
 # the same value as the "X-Api-Key" header from the ESP32-CAM firmware.
 # Leave it unset only for local testing.
 CAMERA_API_KEY = os.environ.get("CAMERA_API_KEY", "")
+
+_latest_frame: bytes | None = None
+_last_frame_time: float | None = None
+_frame_event = asyncio.Event()
+
+# How long without a new uploaded frame before we consider the camera
+# "disconnected." GET /camera/status reports this to the dashboard, which
+# polls it to decide whether to show the live feed or fall back to the
+# default conveyor animation — since an MJPEG <img> stream itself never
+# signals staleness (the HTTP connection to the browser stays open even
+# when the ESP32-CAM has gone quiet).
+CAMERA_STALE_SECONDS = 6
 
 
 @app.post("/camera/upload")
@@ -531,13 +560,9 @@ async def camera_latest(token: str | None = None):
 async def root():
     return {
         "status": "SpectraLink backend running",
-        # `model_loaded` remains for the dashboard's existing status display.
-        # Sorting fuses the NIR model with the latest camera frame when live.
-        "model_loaded": nir_model is not None,
+        "model_loaded": model is not None,
         "nir_model_loaded": nir_model is not None,
-        "image_fusion_ready": Image is not None and np is not None,
         "nir_expected_channels": NIR_EXPECTED_CHANNELS,
-        "latest_nir_reading": latest_nir_reading,
         "connected_dashboards": len(connected_clients),
         "camera_connected": _latest_frame is not None,
     }
